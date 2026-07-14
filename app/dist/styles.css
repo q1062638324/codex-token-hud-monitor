@@ -65,7 +65,7 @@ h1 { margin: 1px 0 0; font-size: 17px; letter-spacing: 0.02em; }
 .connection i { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 8px var(--amber); }
 .connection.ready { color: var(--mint); }
 .connection.ready i { background: var(--mint); box-shadow: 0 0 8px var(--mint); }
-.icon-button { width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: rgba(255,255,255,0.04); cursor: pointer; }
+.icon-button { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: rgba(255,255,255,0.04); cursor: pointer; font-size: 14px; line-height: 1; }
 .icon-button:hover { color: var(--ink); border-color: rgba(154,247,190,0.45); }
 .icon-button.danger:hover { color: #ff9fc5; border-color: rgba(255,159,197,0.55); }
 

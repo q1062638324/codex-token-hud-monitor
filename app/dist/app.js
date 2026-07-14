@@ -100,6 +100,13 @@ async function minimizeToIcon(event) {
   await invoke("minimize_to_icon");
 }
 
+async function minimizeToTaskbar(event) {
+  event.stopPropagation();
+  const invoke = invokeNative();
+  if (!invoke) return;
+  await invoke("minimize_to_taskbar");
+}
+
 async function restoreFromIcon(event) {
   event.stopPropagation();
   const invoke = invokeNative();
@@ -110,6 +117,7 @@ async function restoreFromIcon(event) {
 }
 
 byId("minimize").addEventListener("click", minimizeToIcon);
+byId("taskbar").addEventListener("click", minimizeToTaskbar);
 let iconPointer = null;
 let iconDragBusy = false;
 

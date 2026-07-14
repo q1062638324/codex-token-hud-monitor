@@ -63,6 +63,12 @@ fn minimize_to_icon(window: tauri::WebviewWindow) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+// 使用 Windows 原生行为最小化到任务栏。
+#[tauri::command]
+fn minimize_to_taskbar(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.minimize().map_err(|error| error.to_string())
+}
+
 // 从图标位置向左上恢复，并确保完整窗口仍在当前显示器内。
 #[tauri::command]
 fn restore_window(window: tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
@@ -134,6 +140,7 @@ fn main() {
             read_state,
             resize_window,
             minimize_to_icon,
+            minimize_to_taskbar,
             restore_window,
             close_window
         ])
