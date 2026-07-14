@@ -1,11 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 
 #[tauri::command]
 fn read_state() -> Result<String, String> {
-    let local_app_data = std::env::var_os("LOCALAPPDATA")
-        .ok_or_else(|| "找不到 LOCALAPPDATA".to_string())?;
+    let local_app_data =
+        std::env::var_os("LOCALAPPDATA").ok_or_else(|| "找不到 LOCALAPPDATA".to_string())?;
     let path = std::path::PathBuf::from(local_app_data)
         .join("CodexTokenHUD")
         .join("state.json");
@@ -63,10 +65,10 @@ fn minimize_to_icon(window: tauri::WebviewWindow) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-// 使用 Windows 原生行为最小化到任务栏。
+// 隐藏窗口并保留系统托盘图标，避免退出后台采集进程。
 #[tauri::command]
-fn minimize_to_taskbar(window: tauri::WebviewWindow) -> Result<(), String> {
-    window.minimize().map_err(|error| error.to_string())
+fn minimize_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|error| error.to_string())
 }
 
 // 从图标位置向左上恢复，并确保完整窗口仍在当前显示器内。
@@ -140,19 +142,58 @@ fn main() {
             read_state,
             resize_window,
             minimize_to_icon,
-            minimize_to_taskbar,
+            minimize_to_tray,
             restore_window,
             close_window
         ])
         .setup(|app| {
             let _ = create_desktop_shortcut();
+
+            let show_item = MenuItem::with_id(app, "show", "显示 HUD", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| match event {
+                    TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } => {
+                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+
             if let Some(window) = app.get_webview_window("main") {
                 if let Some(monitor) = window.current_monitor()? {
                     let monitor_position = monitor.position();
                     let monitor_size = monitor.size();
                     let window_size = window.outer_size()?;
-                    let x = monitor_position.x + monitor_size.width as i32 - window_size.width as i32 - 28;
-                    let y = monitor_position.y + monitor_size.height as i32 - window_size.height as i32 - 28;
+                    let x = monitor_position.x + monitor_size.width as i32
+                        - window_size.width as i32
+                        - 28;
+                    let y = monitor_position.y + monitor_size.height as i32
+                        - window_size.height as i32
+                        - 28;
                     window.set_position(tauri::PhysicalPosition::new(x, y))?;
                 }
             }
