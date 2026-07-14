@@ -2,6 +2,17 @@
 
 Codex 的 Windows 透明桌面 HUD，显示当前任务和本地采集的每日、每周 token 使用量。
 
+![Codex Token HUD Monitor](assets/hud-screenshot.png)
+
+## 项目优势
+
+- **实时可见**：直接读取 Codex Desktop session 的 usage 事件，当前任务、输入、输出和 reasoning 一目了然。
+- **缓存透明**：拆分显示 cached input、uncached input 和 input cache hit rate，方便判断上下文复用效果。
+- **日周统计**：按本机时区累计今日与本周 token，支持跨任务查看本机使用趋势。
+- **桌面友好**：透明置顶、右下角启动、顶部拖动、等比例缩放、可缩为可拖动的小图标，并提供退出按钮。
+- **本地优先**：采集器只监听 `127.0.0.1`，不上传 prompt、session 内容或 token 数据。
+- **开箱下载**：GitHub Release 同时提供 Windows 安装包和 Codex 插件 ZIP。
+
 ## 下载与安装
 
 项目通过 GitHub Private Repository 发布，只有仓库所有者和被邀请的协作者可以下载 Release。
