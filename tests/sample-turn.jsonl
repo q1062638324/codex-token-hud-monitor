@@ -1,0 +1,2 @@
+{"type":"thread.started","thread_id":"thr_demo"}
+{"type":"turn.completed","thread_id":"thr_demo","turn_id":"turn_demo_1","model":"gpt-5.4","usage":{"input_tokens":12000,"cached_input_tokens":9000,"output_tokens":850,"reasoning_output_tokens":240}}

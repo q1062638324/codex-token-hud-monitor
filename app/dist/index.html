@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex Token HUD</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="hud">
+      <div class="hud-body">
+        <header class="topbar" data-tauri-drag-region>
+        <div class="brand">
+          <span class="brand-mark">✦</span>
+          <div>
+            <div class="eyebrow">CODEX TELEMETRY</div>
+            <h1>Token HUD</h1>
+          </div>
+        </div>
+        <div class="top-actions">
+          <span class="connection" id="connection"><i></i>等待数据</span>
+          <button class="icon-button" id="minimize" type="button" aria-label="缩小到桌面右下角">↘</button>
+          <button class="icon-button danger" id="exit" type="button" aria-label="退出 HUD">×</button>
+        </div>
+        </header>
+
+        <section class="hero">
+        <div>
+          <div class="section-label">CURRENT TURN</div>
+          <div class="hero-number" id="current-total">0</div>
+          <div class="hero-caption">当前任务总 token</div>
+        </div>
+        <div class="hero-meta">
+          <span id="model">等待 Codex</span>
+          <span id="turn">—</span>
+        </div>
+        </section>
+
+        <section class="metrics" aria-label="当前任务 token 明细">
+        <div class="metric-row">
+          <span><b class="dot cyan"></b>输入</span>
+          <strong id="input">0</strong>
+        </div>
+        <div class="metric-row sub-row">
+          <span><b class="dot mint"></b>缓存命中 <em id="input-hit-rate">0%</em></span>
+          <strong id="cached-input">0</strong>
+        </div>
+        <div class="metric-row sub-row">
+          <span><b class="dot amber"></b>未命中</span>
+          <strong id="uncached-input">0</strong>
+        </div>
+        <div class="metric-row">
+          <span><b class="dot violet"></b>输出</span>
+          <strong id="output">0</strong>
+        </div>
+        <div class="metric-row sub-row">
+          <span><b class="dot muted"></b>输出缓存未命中</span>
+          <strong id="uncached-output">—</strong>
+        </div>
+        <div class="metric-row">
+          <span><b class="dot pink"></b>推理</span>
+          <strong id="reasoning">0</strong>
+        </div>
+        </section>
+
+        <section class="period-card">
+        <div class="period-tabs" role="tablist" aria-label="累计周期">
+          <button class="period-tab active" data-period="today" role="tab" type="button">今日</button>
+          <button class="period-tab" data-period="week" role="tab" type="button">本周</button>
+        </div>
+        <div class="period-value" id="period-total">0</div>
+        <div class="period-foot">
+          <span id="period-cache">缓存命中 0%</span>
+          <span class="tracked">本机累计</span>
+        </div>
+        </section>
+
+        <footer class="footer">
+          <span id="message">本地采集器未收到 usage</span>
+          <span id="updated">—</span>
+        </footer>
+      </div>
+      <button class="icon-face" id="icon-face" type="button" aria-label="恢复 Token HUD">✦</button>
+      <div class="resize-handle" id="resize-handle" aria-label="等比例缩放 HUD"></div>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>

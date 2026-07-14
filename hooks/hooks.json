@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$PLUGIN_ROOT/scripts/hudctl.py\" ensure",
+            "commandWindows": "python \"%PLUGIN_ROOT%\\scripts\\hudctl.py\" ensure",
+            "timeout": 20,
+            "statusMessage": "启动 Codex Token HUD"
+          }
+        ]
+      }
+    ]
+  }
+}

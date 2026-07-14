@@ -1,0 +1,45 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Tauri installer
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: Codex Token HUD Monitor ${{ github.ref_name }}
+          releaseBody: |
+            Windows 安装包与 Codex 插件压缩包。
+
+            安装包用于运行桌面 HUD，插件压缩包用于接入 Codex usage 采集。
+          releaseDraft: true
+          prerelease: false
+          args: --bundles nsis,msi
+
+      - name: Package Codex plugin
+        shell: bash
+        run: git archive --format=zip --output="codex-token-hud-monitor-plugin-${{ github.ref_name }}.zip" HEAD
+
+      - name: Upload plugin package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" "codex-token-hud-monitor-plugin-${{ github.ref_name }}.zip" --clobber
