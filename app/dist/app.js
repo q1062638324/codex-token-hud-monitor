@@ -31,6 +31,79 @@ const formatTokens = (value) => {
   return number.toLocaleString("zh-CN");
 };
 const formatExactTokens = (value) => Number(value || 0).toLocaleString("zh-CN");
+const planNames = {
+  free: "免费",
+  go: "Go",
+  plus: "Plus",
+  pro: "Pro",
+  prolite: "Pro Lite",
+  team: "Team",
+  business: "Business",
+  enterprise: "Enterprise",
+  edu: "教育",
+  unknown: "未知套餐",
+};
+
+function formatWindowLabel(minutes) {
+  const value = Number(minutes);
+  if (!Number.isFinite(value) || value <= 0) return "套餐窗口";
+  if (value >= 43200) return `约 ${Math.round(value / 43200)} 个月`;
+  if (value >= 10080) return "每周";
+  if (value >= 1440) return "每日";
+  if (value >= 60) return `每 ${Math.round(value / 60)} 小时`;
+  return `每 ${Math.round(value)} 分钟`;
+}
+
+function formatResetTime(timestamp) {
+  const seconds = Number(timestamp);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "重置时间 —";
+  const resetAt = new Date(seconds * 1000);
+  if (Number.isNaN(resetAt.getTime())) return "重置时间 —";
+  const date = resetAt.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+  const time = resetAt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return `重置 ${date} ${time}`;
+}
+
+function renderQuota(planUsage) {
+  const quota = planUsage || {};
+  const available = quota.available === true;
+  const planType = quota.plan_type || "unknown";
+  const planLabel = available ? (planNames[planType] || planType) : "—";
+  const primary = quota.primary || null;
+  const secondary = quota.secondary || null;
+  const primaryRemaining = primary && Number.isFinite(Number(primary.remaining_percent))
+    ? Math.max(0, Math.min(100, Number(primary.remaining_percent)))
+    : null;
+  const secondaryRemaining = secondary && Number.isFinite(Number(secondary.remaining_percent))
+    ? Math.max(0, Math.min(100, Number(secondary.remaining_percent)))
+    : null;
+
+  byId("plan-type").textContent = planLabel;
+  byId("quota-primary-label").textContent = primary ? `${formatWindowLabel(primary.window_minutes)}剩余` : (available ? "套餐窗口" : "等待数据");
+  byId("quota-primary").textContent = primaryRemaining === null ? "—" : `${Math.round(primaryRemaining)}%`;
+  byId("quota-primary-reset").textContent = formatResetTime(primary?.resets_at);
+
+  const secondaryVisible = secondaryRemaining !== null;
+  byId("quota-secondary").classList.toggle("is-hidden", !secondaryVisible);
+  byId("quota-secondary-reset").classList.toggle("is-hidden", !secondaryVisible);
+  if (secondaryVisible) {
+    byId("quota-secondary-label").textContent = `${formatWindowLabel(secondary.window_minutes)}剩余`;
+    byId("quota-secondary-value").textContent = `${Math.round(secondaryRemaining)}%`;
+    byId("quota-secondary-reset").textContent = formatResetTime(secondary.resets_at);
+  }
+
+  const credits = quota.credits || null;
+  const creditText = credits?.unlimited
+    ? "额外额度不限"
+    : credits?.has_credits
+      ? `额外额度 ${credits.balance || "可用"}`
+      : "";
+  byId("quota-credits").textContent = creditText;
+  byId("quota-credits").classList.toggle("is-hidden", !creditText);
+  byId("quota-status").textContent = available
+    ? (quota.stale ? "套餐数据暂时未刷新" : "来自 Codex 登录状态")
+    : (quota.message || "等待套餐数据");
+}
 
 function renderUsage(usage) {
   const current = usage || {};
@@ -56,6 +129,7 @@ function render(state) {
   const current = state.current || {};
   renderUsage(current);
   renderPeriod(state[period]);
+  renderQuota(state.plan_usage);
   byId("model").textContent = current.model || "等待 Codex";
   byId("turn").textContent = current.turn_id || "—";
   byId("message").textContent = state.message || "等待 usage 数据";

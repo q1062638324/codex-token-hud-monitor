@@ -104,6 +104,49 @@ class HudCollectorTests(unittest.TestCase):
         self.assertEqual(info["last_token_usage"]["cached_input_tokens"], 800)
         self.assertEqual(timestamp.isoformat(), "2026-07-14T12:00:00+08:00")
 
+    def test_rate_limits_expose_remaining_percent_and_reset(self):
+        plan = HUDCTL.normalize_rate_limits(
+            {
+                "rateLimits": {
+                    "limitId": "codex",
+                    "planType": "plus",
+                    "primary": {
+                        "usedPercent": 35,
+                        "windowDurationMins": 10080,
+                        "resetsAt": 1784680070,
+                    },
+                    "secondary": {
+                        "usedPercent": 80,
+                        "windowDurationMins": 1440,
+                        "resetsAt": 1784000000,
+                    },
+                    "credits": {"hasCredits": False, "unlimited": False, "balance": "0"},
+                }
+            }
+        )
+        assert plan is not None
+        self.assertTrue(plan["available"])
+        self.assertEqual(plan["plan_type"], "plus")
+        self.assertEqual(plan["primary"]["remaining_percent"], 65)
+        self.assertEqual(plan["secondary"]["remaining_percent"], 20)
+        self.assertEqual(plan["primary"]["window_minutes"], 10080)
+
+    def test_rate_limits_support_multi_bucket_response(self):
+        plan = HUDCTL.normalize_rate_limits(
+            {
+                "rateLimits": {"planType": "free"},
+                "rateLimitsByLimitId": {
+                    "codex": {
+                        "planType": "pro",
+                        "primary": {"usedPercent": 101, "windowDurationMins": 60},
+                    }
+                },
+            }
+        )
+        assert plan is not None
+        self.assertEqual(plan["plan_type"], "pro")
+        self.assertEqual(plan["primary"]["remaining_percent"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

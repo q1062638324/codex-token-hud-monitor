@@ -7,7 +7,9 @@ import datetime as dt
 import hashlib
 import json
 import os
+import queue
 import re
+import shutil
 import sqlite3
 import struct
 import subprocess
@@ -25,6 +27,8 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "CodexTokenHUD"
 STATE_PATH = DATA_ROOT / "state.json"
 STATE_LOCK = threading.RLock()
+PLAN_USAGE_REFRESH_SECONDS = 60
+PLAN_USAGE_TIMEOUT_SECONDS = 8
 
 METRIC_ALIASES: dict[str, tuple[str, ...]] = {
     "input_tokens": ("input_tokens", "inputTokens", "prompt_tokens", "promptTokens"),
@@ -282,6 +286,231 @@ def display_usage(raw: dict[str, int | None]) -> dict[str, Any]:
     }
 
 
+def empty_plan_usage(message: str = "等待 Codex 套餐数据") -> dict[str, Any]:
+    """返回不带账号信息的套餐额度占位状态。"""
+    return {
+        "available": False,
+        "plan_type": None,
+        "limit_id": None,
+        "limit_name": None,
+        "primary": None,
+        "secondary": None,
+        "credits": None,
+        "rate_limit_reached_type": None,
+        "updated_at": None,
+        "stale": False,
+        "message": message,
+        "source": None,
+    }
+
+
+def normalize_rate_limit_window(value: Any) -> dict[str, int | None] | None:
+    """把 app-server 的 rate limit 窗口转换成 HUD 使用的稳定字段。"""
+    if not isinstance(value, dict):
+        return None
+    used = as_int(value.get("usedPercent", value.get("used_percent")))
+    if used is None:
+        return None
+    used = min(max(used, 0), 100)
+    duration = as_int(value.get("windowDurationMins", value.get("window_duration_mins")))
+    reset_at = as_int(value.get("resetsAt", value.get("resets_at")))
+    return {
+        "used_percent": used,
+        "remaining_percent": 100 - used,
+        "window_minutes": duration,
+        "resets_at": reset_at,
+    }
+
+
+def normalize_rate_limits(value: Any) -> dict[str, Any] | None:
+    """解析 Codex app-server 的 account/rateLimits/read 返回值。"""
+    if not isinstance(value, dict):
+        return None
+    buckets = value.get("rateLimitsByLimitId")
+    snapshot = buckets.get("codex") if isinstance(buckets, dict) else None
+    if not isinstance(snapshot, dict):
+        snapshot = value.get("rateLimits")
+    if not isinstance(snapshot, dict):
+        return None
+
+    credits_value = snapshot.get("credits")
+    credits = None
+    if isinstance(credits_value, dict):
+        balance = credits_value.get("balance")
+        if not isinstance(balance, (str, int, float)) or isinstance(balance, bool):
+            balance = None
+        credits = {
+            "has_credits": bool(credits_value.get("hasCredits", credits_value.get("has_credits", False))),
+            "unlimited": bool(credits_value.get("unlimited", False)),
+            "balance": str(balance) if balance is not None else None,
+        }
+
+    plan_type = snapshot.get("planType", snapshot.get("plan_type"))
+    if not isinstance(plan_type, str) or not plan_type.strip():
+        plan_type = None
+    limit_id = snapshot.get("limitId", snapshot.get("limit_id"))
+    if not isinstance(limit_id, str) or not limit_id.strip():
+        limit_id = None
+    limit_name = snapshot.get("limitName", snapshot.get("limit_name"))
+    if not isinstance(limit_name, str) or not limit_name.strip():
+        limit_name = None
+    return {
+        "available": True,
+        "plan_type": plan_type,
+        "limit_id": limit_id,
+        "limit_name": limit_name,
+        "primary": normalize_rate_limit_window(snapshot.get("primary")),
+        "secondary": normalize_rate_limit_window(snapshot.get("secondary")),
+        "credits": credits,
+        "rate_limit_reached_type": snapshot.get("rateLimitReachedType", snapshot.get("rate_limit_reached_type")),
+        "updated_at": None,
+        "stale": False,
+        "message": "已读取 Codex 套餐用量",
+        "source": "codex-app-server",
+    }
+
+
+def find_codex_cli() -> str | None:
+    """定位 Codex CLI，优先使用用户显式指定或用户目录安装的版本。"""
+    configured = os.environ.get("CODEX_CLI_PATH")
+    if configured:
+        path = Path(configured).expanduser()
+        if path.is_file():
+            return str(path)
+    install_root = Path.home() / "AppData" / "Local" / "OpenAI" / "Codex" / "bin"
+    candidates = list(install_root.glob("*/codex.exe")) if install_root.exists() else []
+    candidates.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+    if candidates:
+        return str(candidates[0])
+    return shutil.which("codex") or shutil.which("codex.exe")
+
+
+def fetch_rate_limits() -> dict[str, Any] | None:
+    """通过 Codex 自带 app-server 读取额度，不接触本地认证文件。"""
+    executable = find_codex_cli()
+    if executable is None:
+        return None
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    try:
+        process = subprocess.Popen(
+            [executable, "app-server", "--listen", "stdio://"],
+            cwd=str(PLUGIN_ROOT),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=creation_flags,
+        )
+    except (OSError, ValueError):
+        return None
+
+    lines: queue.Queue[str | None] = queue.Queue()
+
+    def read_stdout() -> None:
+        if process.stdout is None:
+            lines.put(None)
+            return
+        try:
+            for line in process.stdout:
+                lines.put(line)
+        finally:
+            lines.put(None)
+
+    reader = threading.Thread(target=read_stdout, name="codex-app-server-reader", daemon=True)
+    reader.start()
+
+    def send(message: dict[str, Any]) -> None:
+        if process.stdin is None:
+            raise OSError("app-server stdin 不可用")
+        process.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
+        process.stdin.flush()
+
+    try:
+        send(
+            {
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {"name": "codex-token-hud", "version": "0.1.5"},
+                    "capabilities": {"experimentalApi": True},
+                },
+            }
+        )
+        deadline = time.monotonic() + PLAN_USAGE_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            remaining = max(deadline - time.monotonic(), 0.05)
+            try:
+                line = lines.get(timeout=remaining)
+            except queue.Empty:
+                return None
+            if line is None:
+                return None
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(message, dict):
+                continue
+            if message.get("id") == 1:
+                if message.get("error") is not None:
+                    return None
+                send({"method": "initialized", "params": {}})
+                send({"id": 2, "method": "account/rateLimits/read", "params": None})
+            elif message.get("id") == 2:
+                if message.get("error") is not None:
+                    return None
+                return normalize_rate_limits(message.get("result"))
+        return None
+    except (OSError, ValueError, BrokenPipeError):
+        return None
+    finally:
+        if process.stdin is not None:
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
+        if process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=0.8)
+            except (OSError, subprocess.TimeoutExpired):
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+
+
+def refresh_plan_usage() -> None:
+    """刷新套餐状态，失败时保留上次成功值并标记为过期。"""
+    snapshot = fetch_rate_limits()
+    stamp = now_local().isoformat(timespec="seconds")
+    with STATE_LOCK:
+        state = load_state()
+        previous = state.get("plan_usage")
+        if snapshot is not None:
+            snapshot["updated_at"] = stamp
+            state["plan_usage"] = snapshot
+        elif isinstance(previous, dict) and previous.get("available"):
+            previous["stale"] = True
+            previous["message"] = "套餐数据暂时无法刷新"
+            state["plan_usage"] = previous
+        else:
+            state["plan_usage"] = empty_plan_usage("等待 Codex 套餐数据")
+        save_state(state)
+
+
+def plan_usage_watcher() -> None:
+    refresh_plan_usage()
+    while True:
+        time.sleep(PLAN_USAGE_REFRESH_SECONDS)
+        try:
+            refresh_plan_usage()
+        except Exception:
+            pass
+
+
 def base_state() -> dict[str, Any]:
     return {
         "version": 1,
@@ -289,6 +518,7 @@ def base_state() -> dict[str, Any]:
         "current": None,
         "today": display_usage(empty_usage()),
         "week": display_usage(empty_usage()),
+        "plan_usage": empty_plan_usage(),
         "tracked": {"today": {}, "week": {}},
         "source": None,
         "message": "等待 Codex usage 数据",
@@ -617,6 +847,7 @@ class HudHandler(BaseHTTPRequestHandler):
 
 def serve() -> None:
     threading.Thread(target=rollout_watcher, name="codex-rollout-watcher", daemon=True).start()
+    threading.Thread(target=plan_usage_watcher, name="codex-plan-usage-watcher", daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), HudHandler)
     print(f"Codex Token HUD collector listening on http://{HOST}:{PORT}")
     server.serve_forever()

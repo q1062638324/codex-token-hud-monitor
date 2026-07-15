@@ -83,13 +83,24 @@ h1 { margin: 1px 0 0; font-size: 17px; letter-spacing: 0.02em; }
 .dot { display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; }
 .cyan { background: var(--cyan); }.mint { background: var(--mint); }.amber { background: var(--amber); }.violet { background: var(--violet); }.pink { background: var(--pink); }.muted { background: #668079; }
 
-.period-card { margin-top: 13px; padding: 11px 12px 10px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,0.035); }
+.summary-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; min-width: 0; margin-top: 13px; }
+.period-card, .quota-card { min-width: 0; padding: 11px 12px 10px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,0.035); }
 .period-tabs { display: flex; gap: 5px; }
 .period-tab { padding: 3px 8px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; }
 .period-tab.active { color: var(--ink); background: rgba(107,232,224,0.14); }
 .period-value { margin: 5px 0 2px; color: var(--mint); font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 700; }
 .period-foot { color: var(--muted); font-size: 10px; }
 .tracked { padding: 3px 6px; border: 1px solid rgba(154,247,190,0.18); border-radius: 5px; color: var(--mint); }
+.quota-head, .quota-primary-row, .quota-secondary { display: flex; align-items: center; justify-content: space-between; min-width: 0; gap: 6px; }
+.quota-plan, .quota-primary-row span, .quota-secondary span, .quota-reset, .quota-status, .quota-credits { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quota-plan { color: var(--mint); font-size: 11px; }
+.quota-primary-row { margin-top: 7px; color: var(--muted); font-size: 10px; }
+.quota-primary-row strong { color: var(--cyan); font-variant-numeric: tabular-nums; font-size: 24px; line-height: 1; }
+.quota-reset, .quota-status, .quota-credits { margin-top: 6px; color: var(--muted); font-size: 9px; }
+.quota-secondary { margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.quota-secondary strong { color: var(--mint); font-variant-numeric: tabular-nums; font-size: 13px; }
+.quota-status { color: rgba(134,163,157,0.78); }
+.is-hidden { display: none !important; }
 .footer { gap: 8px; padding-top: 11px; font-size: 10px; }
 .footer span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .resize-handle { position: absolute; right: 0; bottom: 0; z-index: 5; width: 24px; height: 24px; cursor: nwse-resize; pointer-events: auto; opacity: 0.7; background: linear-gradient(135deg, transparent 48%, rgba(154,247,190,0.75) 49%, rgba(154,247,190,0.75) 56%, transparent 57%), linear-gradient(135deg, transparent 63%, rgba(107,232,224,0.6) 64%, rgba(107,232,224,0.6) 71%, transparent 72%); }

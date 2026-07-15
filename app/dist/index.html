@@ -64,16 +64,37 @@
         </div>
         </section>
 
-        <section class="period-card">
-        <div class="period-tabs" role="tablist" aria-label="累计周期">
-          <button class="period-tab active" data-period="today" role="tab" type="button">今日</button>
-          <button class="period-tab" data-period="week" role="tab" type="button">本周</button>
-        </div>
-        <div class="period-value" id="period-total">0</div>
-        <div class="period-foot">
-          <span id="period-cache">缓存命中 0%</span>
-          <span class="tracked">本机累计</span>
-        </div>
+        <section class="summary-grid">
+          <section class="period-card">
+          <div class="period-tabs" role="tablist" aria-label="累计周期">
+            <button class="period-tab active" data-period="today" role="tab" type="button">今日</button>
+            <button class="period-tab" data-period="week" role="tab" type="button">本周</button>
+          </div>
+          <div class="period-value" id="period-total">0</div>
+          <div class="period-foot">
+            <span id="period-cache">缓存命中 0%</span>
+            <span class="tracked">本机累计</span>
+          </div>
+          </section>
+
+          <section class="quota-card" aria-label="当前套餐剩余用量">
+            <div class="quota-head">
+              <span class="section-label">套餐余量</span>
+              <strong class="quota-plan" id="plan-type">—</strong>
+            </div>
+            <div class="quota-primary-row">
+              <span id="quota-primary-label">等待数据</span>
+              <strong id="quota-primary">—</strong>
+            </div>
+            <div class="quota-reset" id="quota-primary-reset">重置时间 —</div>
+            <div class="quota-secondary is-hidden" id="quota-secondary">
+              <span id="quota-secondary-label">—</span>
+              <strong id="quota-secondary-value">—</strong>
+            </div>
+            <div class="quota-reset is-hidden" id="quota-secondary-reset">重置时间 —</div>
+            <div class="quota-credits is-hidden" id="quota-credits"></div>
+            <div class="quota-status" id="quota-status">等待套餐数据</div>
+          </section>
         </section>
 
         <footer class="footer">
