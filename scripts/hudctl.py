@@ -537,11 +537,42 @@ def load_state() -> dict[str, Any]:
         return base_state()
 
 
+def period_usage_views(
+    state: dict[str, Any], stamp: dt.datetime | None = None
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """按当前本机日期和 ISO 周从原始累计数据重算 HUD 周期视图。"""
+    local_stamp = stamp.astimezone() if stamp is not None else now_local()
+    day_key = local_stamp.date().isoformat()
+    iso = local_stamp.isocalendar()
+    week_key = f"{iso.year}-W{iso.week:02d}"
+    tracked = state.get("tracked") if isinstance(state.get("tracked"), dict) else {}
+    today_tracked = tracked.get("today") if isinstance(tracked.get("today"), dict) else {}
+    week_tracked = tracked.get("week") if isinstance(tracked.get("week"), dict) else {}
+    today_raw = today_tracked.get(day_key)
+    week_raw = week_tracked.get(week_key)
+    return (
+        display_usage(today_raw if isinstance(today_raw, dict) else empty_usage()),
+        display_usage(week_raw if isinstance(week_raw, dict) else empty_usage()),
+    )
+
+
 def save_state(state: dict[str, Any]) -> None:
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
     temp_path = STATE_PATH.with_suffix(".tmp")
     temp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     temp_path.replace(STATE_PATH)
+
+
+def refresh_period_views() -> None:
+    """在跨日或跨周且没有新事件时，及时清理上一周期的显示值。"""
+    with STATE_LOCK:
+        state = load_state()
+        today, week = period_usage_views(state)
+        if state.get("today") == today and state.get("week") == week:
+            return
+        state["today"] = today
+        state["week"] = week
+        save_state(state)
 
 
 def ingest_record(
@@ -570,8 +601,7 @@ def ingest_record(
         week_raw = tracked.setdefault("week", {}).setdefault(week_key, empty_usage())
         merge_usage(today_raw, usage)
         merge_usage(week_raw, usage)
-        state["today"] = display_usage(today_raw)
-        state["week"] = display_usage(week_raw)
+        state["today"], state["week"] = period_usage_views(state)
         if update_current:
             state["current"] = {
                 **display_usage(usage),
@@ -790,6 +820,10 @@ def rollout_watcher() -> None:
     while True:
         try:
             scan_rollouts_once()
+        except Exception:
+            pass
+        try:
+            refresh_period_views()
         except Exception:
             pass
         time.sleep(1)

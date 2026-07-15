@@ -147,6 +147,36 @@ class HudCollectorTests(unittest.TestCase):
         self.assertEqual(plan["plan_type"], "pro")
         self.assertEqual(plan["primary"]["remaining_percent"], 0)
 
+    def test_period_views_reset_after_day_and_iso_week_rollover(self):
+        timezone = HUDCTL.dt.timezone(HUDCTL.dt.timedelta(hours=8))
+        state = {
+            "tracked": {
+                "today": {"2026-07-14": {"input_tokens": 123}},
+                "week": {"2026-W28": {"input_tokens": 456}},
+            }
+        }
+        today, week = HUDCTL.period_usage_views(
+            state,
+            HUDCTL.dt.datetime(2026, 7, 15, 8, 0, tzinfo=timezone),
+        )
+        self.assertEqual(today["input_tokens"], 0)
+        self.assertEqual(week["input_tokens"], 0)
+
+    def test_period_views_keep_current_day_and_week_data(self):
+        timezone = HUDCTL.dt.timezone(HUDCTL.dt.timedelta(hours=8))
+        state = {
+            "tracked": {
+                "today": {"2026-07-15": {"input_tokens": 123}},
+                "week": {"2026-W29": {"input_tokens": 456}},
+            }
+        }
+        today, week = HUDCTL.period_usage_views(
+            state,
+            HUDCTL.dt.datetime(2026, 7, 15, 8, 0, tzinfo=timezone),
+        )
+        self.assertEqual(today["input_tokens"], 123)
+        self.assertEqual(week["input_tokens"], 456)
+
 
 if __name__ == "__main__":
     unittest.main()
