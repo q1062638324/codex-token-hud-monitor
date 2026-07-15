@@ -1,8 +1,10 @@
 # Codex Token HUD Monitor
 
-Codex 的 Windows 透明桌面 HUD，显示当前任务、本地每日/每周 token 使用量，以及当前套餐剩余用量。
+把 Codex 的 token 使用情况固定在桌面角落：一个原生 Windows 透明 HUD，实时显示当前任务、input/output/reasoning、缓存命中率、今日/本周累计，以及当前套餐剩余用量。无需切换窗口，也不用打开额外网页。
 
-![Codex Token HUD Monitor](assets/hud-screenshot.png)
+![Codex Token HUD Monitor：当前任务、日周累计与套餐余量](assets/hud-screenshot.png)
+
+> 截图展示：左侧是当前任务与缓存明细，右侧是当前套餐、剩余百分比和重置时间。
 
 ## 项目优势
 
