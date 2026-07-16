@@ -26,6 +26,7 @@ PORT = 38427
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "CodexTokenHUD"
 STATE_PATH = DATA_ROOT / "state.json"
+PLUGIN_ROOT_MARKER = DATA_ROOT / "plugin-root.txt"
 STATE_LOCK = threading.RLock()
 PLAN_USAGE_REFRESH_SECONDS = 60
 PLAN_USAGE_TIMEOUT_SECONDS = 8
@@ -563,6 +564,17 @@ def save_state(state: dict[str, Any]) -> None:
     temp_path.replace(STATE_PATH)
 
 
+def save_plugin_root_marker() -> None:
+    """记录插件根目录，让桌面直接打开 HUD 时也能找到 collector。"""
+    try:
+        DATA_ROOT.mkdir(parents=True, exist_ok=True)
+        temporary = PLUGIN_ROOT_MARKER.with_suffix(".tmp")
+        temporary.write_text(str(PLUGIN_ROOT), encoding="utf-8")
+        temporary.replace(PLUGIN_ROOT_MARKER)
+    except OSError:
+        pass
+
+
 def refresh_period_views() -> None:
     """在跨日或跨周且没有新事件时，及时清理上一周期的显示值。"""
     with STATE_LOCK:
@@ -898,6 +910,7 @@ def is_server_ready() -> bool:
 
 
 def start_collector() -> None:
+    save_plugin_root_marker()
     if is_server_ready():
         return
     creation_flags = 0
@@ -925,7 +938,9 @@ def start_hud() -> str:
     ]
     for executable in candidates:
         if executable.exists():
-            subprocess.Popen([str(executable)], cwd=str(executable.parent))
+            environment = os.environ.copy()
+            environment["CODEX_TOKEN_HUD_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+            subprocess.Popen([str(executable)], cwd=str(executable.parent), env=environment)
             return str(executable)
     return "未找到已构建的 HUD，可先执行 cargo build --manifest-path app/src-tauri/Cargo.toml"
 

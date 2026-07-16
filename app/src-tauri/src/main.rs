@@ -4,6 +4,73 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 
+fn collector_is_ready() -> bool {
+    std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:38427".parse().expect("collector 地址有效"),
+        std::time::Duration::from_millis(250),
+    )
+    .is_ok()
+}
+
+fn find_plugin_root() -> Option<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    for key in ["CODEX_TOKEN_HUD_PLUGIN_ROOT", "PLUGIN_ROOT"] {
+        if let Some(value) = std::env::var_os(key) {
+            candidates.push(std::path::PathBuf::from(value));
+        }
+    }
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        let marker = std::path::PathBuf::from(local_app_data)
+            .join("CodexTokenHUD")
+            .join("plugin-root.txt");
+        if let Ok(value) = std::fs::read_to_string(marker) {
+            candidates.push(std::path::PathBuf::from(value.trim()));
+        }
+    }
+    if let Ok(executable) = std::env::current_exe() {
+        for ancestor in executable.ancestors() {
+            candidates.push(ancestor.to_path_buf());
+        }
+    }
+    candidates
+        .into_iter()
+        .find(|root| root.join("scripts").join("hudctl.py").is_file())
+}
+
+#[tauri::command]
+fn ensure_collector() -> Result<(), String> {
+    if collector_is_ready() {
+        return Ok(());
+    }
+    let plugin_root = find_plugin_root()
+        .ok_or_else(|| "找不到 Codex Token HUD 插件目录，无法启动 collector".to_string())?;
+    let script = plugin_root.join("scripts").join("hudctl.py");
+    let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
+    let mut command = std::process::Command::new(python);
+    command
+        .arg(script)
+        .arg("serve")
+        .current_dir(&plugin_root)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x00000008 | 0x00000200 | 0x08000000);
+    }
+    command
+        .spawn()
+        .map_err(|error| format!("启动 collector 失败：{error}"))?;
+    for _ in 0..30 {
+        if collector_is_ready() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Err("collector 启动超时".to_string())
+}
+
 #[tauri::command]
 fn read_state() -> Result<String, String> {
     let local_app_data =
@@ -140,6 +207,7 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             read_state,
+            ensure_collector,
             resize_window,
             minimize_to_icon,
             minimize_to_tray,
@@ -147,6 +215,7 @@ fn main() {
             close_window
         ])
         .setup(|app| {
+            let _ = ensure_collector();
             let _ = create_desktop_shortcut();
 
             let show_item = MenuItem::with_id(app, "show", "显示 HUD", true, None::<&str>)?;

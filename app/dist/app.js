@@ -138,11 +138,28 @@ function render(state) {
   byId("connection").lastChild.textContent = " 已连接";
 }
 
+let lastCollectorCheck = 0;
+async function ensureCollector(invoke) {
+  const now = Date.now();
+  if (now - lastCollectorCheck < 5000) return true;
+  lastCollectorCheck = now;
+  try {
+    await invoke("ensure_collector");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function refresh() {
   try {
     const invoke = window.__TAURI__?.core?.invoke;
     if (invoke) {
-      render(JSON.parse(await invoke("read_state")));
+      const collectorReady = await ensureCollector(invoke);
+      const state = JSON.parse(await invoke("read_state"));
+      render(state);
+      byId("connection").classList.toggle("ready", collectorReady);
+      byId("connection").lastChild.textContent = collectorReady ? " 已连接" : " 等待采集器";
     } else {
       const response = await fetch(`${endpoint}?t=${Date.now()}`, { cache: "no-store" });
       if (!response.ok) throw new Error("state unavailable");
