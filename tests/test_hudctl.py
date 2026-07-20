@@ -66,6 +66,66 @@ class HudCollectorTests(unittest.TestCase):
         self.assertFalse(shown["output_cache_available"])
         self.assertEqual(shown["uncached_output_tokens"], 20)
 
+    def test_api_cost_uses_cached_input_discount_and_output_price(self):
+        estimate = HUDCTL.cost_for_usage(
+            {
+                "input_tokens": 100,
+                "cached_input_tokens": 60,
+                "output_tokens": 20,
+            },
+            "gpt-5.6",
+        )
+        self.assertTrue(estimate["cost_available"])
+        self.assertEqual(estimate["cost_model"], "gpt-5.6-sol")
+        self.assertAlmostEqual(estimate["cost_usd"], 0.00083, places=8)
+
+    def test_api_cost_stays_unavailable_when_model_is_unknown(self):
+        estimate = HUDCTL.cost_for_usage(
+            {"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 20},
+            "unknown-model",
+        )
+        self.assertFalse(estimate["cost_available"])
+        self.assertIsNone(estimate["cost_usd"])
+
+    def test_period_views_include_api_cost_for_complete_model_buckets(self):
+        timezone = HUDCTL.dt.timezone(HUDCTL.dt.timedelta(hours=8))
+        usage = {"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 20}
+        state = {
+            "tracked": {
+                "today": {"2026-07-15": usage.copy()},
+                "week": {"2026-W29": usage.copy()},
+                "today_models": {"2026-07-15": {"gpt-5.6-sol": usage.copy()}},
+                "week_models": {"2026-W29": {"gpt-5.6-sol": usage.copy()}},
+            }
+        }
+        today, week = HUDCTL.period_usage_views(
+            state,
+            HUDCTL.dt.datetime(2026, 7, 15, 8, 0, tzinfo=timezone),
+        )
+        self.assertTrue(today["cost_available"])
+        self.assertAlmostEqual(today["cost_usd"], 0.00083, places=8)
+        self.assertEqual(week["cost_models"], ["gpt-5.6-sol"])
+
+    def test_period_views_estimate_legacy_data_with_current_model(self):
+        timezone = HUDCTL.dt.timezone(HUDCTL.dt.timedelta(hours=8))
+        usage = {"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 20}
+        state = {
+            "current": {"model": "gpt-5.6-luna"},
+            "tracked": {
+                "today": {"2026-07-15": usage.copy()},
+                "week": {"2026-W29": usage.copy()},
+            },
+        }
+        today, week = HUDCTL.period_usage_views(
+            state,
+            HUDCTL.dt.datetime(2026, 7, 15, 8, 0, tzinfo=timezone),
+        )
+        self.assertTrue(today["cost_available"])
+        self.assertTrue(today["cost_approximate"])
+        self.assertEqual(today["cost_message"], "按当前模型估算历史数据")
+        self.assertAlmostEqual(today["cost_usd"], 0.000166, places=8)
+        self.assertTrue(week["cost_approximate"])
+
     def test_otlp_protobuf_log_attributes(self):
         log_record = (
             field(6, 2, key_value("input_tokens", 100))

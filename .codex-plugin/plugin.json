@@ -1,6 +1,6 @@
 {
   "name": "codex-token-hud",
-  "version": "0.1.6+codex.20260715010119",
+  "version": "0.1.8+codex.20260720175548",
   "description": "\u5728 Windows \u684c\u9762\u663e\u793a Codex token\u3001\u7f13\u5b58\u547d\u4e2d\u3001\u672c\u5730\u65e5\u5468\u7d2f\u8ba1\u4e0e\u5f53\u524d\u5957\u9910\u4f59\u91cf\u7684 HUD\u3002",
   "author": {
     "name": "\u55b5\u514b\u9171"
