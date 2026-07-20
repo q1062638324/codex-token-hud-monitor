@@ -4,7 +4,7 @@
   background: transparent;
   --ink: #fff7fc;
   --muted: #e8c6d8;
-  --panel: rgba(30, 4, 22, 0.99);
+  --panel: rgba(62, 15, 49, 0.985);
   --line: rgba(255, 68, 158, 0.22);
   --cyan: #acfe6c;
   --mint: #d8ffad;
@@ -46,7 +46,7 @@ button { font: inherit; }
   clip-path: inset(0 round 18px);
   flex: 1 1 auto;
   position: relative;
-  background: radial-gradient(circle at 92% 0%, rgba(172, 254, 108, 0.18), transparent 32%), radial-gradient(circle at 12% 100%, rgba(255, 68, 158, 0.48), transparent 48%), linear-gradient(145deg, rgba(61, 8, 39, 0.99), var(--panel));
+  background: radial-gradient(circle at 92% 0%, rgba(172, 254, 108, 0.26), transparent 34%), radial-gradient(circle at 12% 100%, rgba(255, 68, 158, 0.62), transparent 54%), linear-gradient(145deg, #8f265f 0%, #6d1a54 44%, #4a1747 100%);
   box-shadow: 0 18px 50px rgba(72, 0, 46, 0.76);
   color: var(--ink);
   backdrop-filter: blur(18px);
