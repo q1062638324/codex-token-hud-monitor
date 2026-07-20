@@ -72,6 +72,7 @@ h1 { margin: 1px 0 0; font-size: 17px; letter-spacing: 0.02em; }
 .hero { display: flex; justify-content: space-between; align-items: end; min-width: 0; padding: 18px 0 13px; }
 .hero-number { margin-top: 3px; color: var(--cyan); font-variant-numeric: tabular-nums; font-size: 35px; font-weight: 750; letter-spacing: -0.04em; }
 .hero-caption, .hero-meta, .footer { color: var(--muted); font-size: 11px; }
+.hero-caption #current-cost { color: var(--mint); }
 .hero-meta { display: grid; gap: 5px; text-align: right; max-width: 145px; overflow: hidden; }
 .hero-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -89,6 +90,7 @@ h1 { margin: 1px 0 0; font-size: 17px; letter-spacing: 0.02em; }
 .period-tab { padding: 3px 8px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; }
 .period-tab.active { color: var(--ink); background: rgba(107,232,224,0.14); }
 .period-value { margin: 5px 0 2px; color: var(--mint); font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 700; }
+.period-cost { color: var(--mint); font-variant-numeric: tabular-nums; font-size: 11px; }
 .period-foot { color: var(--muted); font-size: 10px; }
 .tracked { padding: 3px 6px; border: 1px solid rgba(154,247,190,0.18); border-radius: 5px; color: var(--mint); }
 .quota-head, .quota-primary-row, .quota-secondary { display: flex; align-items: center; justify-content: space-between; min-width: 0; gap: 6px; }

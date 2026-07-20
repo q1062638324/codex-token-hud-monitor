@@ -27,9 +27,17 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "CodexTokenHUD"
 STATE_PATH = DATA_ROOT / "state.json"
 PLUGIN_ROOT_MARKER = DATA_ROOT / "plugin-root.txt"
+PRICING_PATH = PLUGIN_ROOT / "config" / "pricing.json"
 STATE_LOCK = threading.RLock()
 PLAN_USAGE_REFRESH_SECONDS = 60
 PLAN_USAGE_TIMEOUT_SECONDS = 8
+_PRICING_CACHE: dict[str, dict[str, float]] | None = None
+_PRICING_CACHE_MTIME: int | None = None
+DEFAULT_PRICING_TABLE: dict[str, dict[str, float]] = {
+    "gpt-5.6-sol": {"input": 5.0, "cached_input": 0.5, "output": 30.0},
+    "gpt-5.6-terra": {"input": 2.5, "cached_input": 0.25, "output": 15.0},
+    "gpt-5.6-luna": {"input": 1.0, "cached_input": 0.1, "output": 6.0},
+}
 
 METRIC_ALIASES: dict[str, tuple[str, ...]] = {
     "input_tokens": ("input_tokens", "inputTokens", "prompt_tokens", "promptTokens"),
@@ -268,13 +276,169 @@ def merge_usage(target: dict[str, int | None], incoming: dict[str, int | None]) 
     return target
 
 
-def display_usage(raw: dict[str, int | None]) -> dict[str, Any]:
+def empty_cost(model: str | None = None, message: str = "等待模型价格") -> dict[str, Any]:
+    return {
+        "cost_usd": None,
+        "cost_available": False,
+        "cost_approximate": False,
+        "cost_model": model,
+        "cost_models": [],
+        "cost_message": message,
+    }
+
+
+def load_pricing_table() -> dict[str, dict[str, float]]:
+    """读取可编辑的 API 美元价格表，文件异常时使用内置默认值。"""
+    global _PRICING_CACHE, _PRICING_CACHE_MTIME
+    try:
+        mtime = PRICING_PATH.stat().st_mtime_ns
+    except OSError:
+        mtime = None
+    if _PRICING_CACHE is not None and _PRICING_CACHE_MTIME == mtime:
+        return _PRICING_CACHE
+
+    table: dict[str, dict[str, float]] = {
+        model: rates.copy() for model, rates in DEFAULT_PRICING_TABLE.items()
+    }
+    try:
+        payload = json.loads(PRICING_PATH.read_text(encoding="utf-8"))
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if isinstance(models, dict):
+            for model, rates in models.items():
+                if not isinstance(model, str) or not isinstance(rates, dict):
+                    continue
+                parsed: dict[str, float] = {}
+                for field in ("input", "cached_input", "output"):
+                    value = rates.get(field)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+                        parsed[field] = float(value)
+                if len(parsed) == 3:
+                    table[model.strip().lower()] = parsed
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    _PRICING_CACHE = table
+    _PRICING_CACHE_MTIME = mtime
+    return table
+
+
+def canonical_model(model: Any) -> str | None:
+    if not isinstance(model, str) or not model.strip():
+        return None
+    value = model.strip().lower()
+    table = load_pricing_table()
+    aliases = {
+        "gpt-5.6": "gpt-5.6-sol",
+        "gpt-5.6-sol": "gpt-5.6-sol",
+        "gpt-5.6-terra": "gpt-5.6-terra",
+        "gpt-5.6-luna": "gpt-5.6-luna",
+    }
+    candidate = aliases.get(value, value)
+    if candidate in table:
+        return candidate
+    for known_model in table:
+        if value.startswith(f"{known_model}-"):
+            return known_model
+    return None
+
+
+def cost_for_usage(raw: dict[str, int | None], model: Any) -> dict[str, Any]:
+    """按每百万 token 的 API 价格估算一条 usage 的美元成本。"""
+    model_key = canonical_model(model)
+    if model_key is None:
+        return empty_cost(model if isinstance(model, str) else None, "模型价格未知")
+    rates = load_pricing_table()[model_key]
+    input_tokens = int(raw.get("input_tokens") or 0)
+    cached_input = min(int(raw.get("cached_input_tokens") or 0), input_tokens)
+    uncached_input = max(input_tokens - cached_input, 0)
+    output_tokens = int(raw.get("output_tokens") or 0)
+    total = (
+        uncached_input * rates["input"]
+        + cached_input * rates["cached_input"]
+        + output_tokens * rates["output"]
+    ) / 1_000_000
+    return {
+        "cost_usd": round(total, 8),
+        "cost_available": True,
+        "cost_approximate": False,
+        "cost_model": model_key,
+        "cost_models": [model_key],
+        "cost_message": "API 估算",
+    }
+
+
+def cost_for_model_usage(
+    model_usage: dict[str, Any] | None,
+    expected_usage: dict[str, int | None] | None = None,
+    fallback_model: Any = None,
+) -> dict[str, Any]:
+    """汇总周期内各模型成本，旧数据缺少模型时使用当前模型并标记近似。"""
+    model_usage = model_usage if isinstance(model_usage, dict) else {}
+    fallback_key = canonical_model(fallback_model)
+    expected = expected_usage if isinstance(expected_usage, dict) else None
+    if not model_usage:
+        if expected is None or fallback_key is None:
+            return empty_cost(message="缺少模型信息")
+        estimate = cost_for_usage(expected, fallback_key)
+        estimate["cost_approximate"] = True
+        estimate["cost_message"] = "按当前模型估算历史数据"
+        return estimate
+
+    total = 0.0
+    combined = empty_usage()
+    models: list[str] = []
+    approximate = False
+    for model, raw in model_usage.items():
+        if not isinstance(raw, dict):
+            return empty_cost(message="模型 usage 数据无效")
+        model_key = canonical_model(model)
+        if model_key is None:
+            if fallback_key is None:
+                return empty_cost(model if isinstance(model, str) else None, "模型价格未知")
+            model_key = fallback_key
+            approximate = True
+        estimate = cost_for_usage(raw, model_key)
+        if not estimate["cost_available"]:
+            return empty_cost(model_key, estimate["cost_message"])
+        total += float(estimate["cost_usd"] or 0)
+        merge_usage(combined, raw)
+        models.append(model_key)
+
+    if expected is not None:
+        missing = empty_usage()
+        has_missing = False
+        for key in ("input_tokens", "cached_input_tokens", "output_tokens"):
+            combined_value = int(combined.get(key) or 0)
+            expected_value = int(expected.get(key) or 0)
+            if combined_value > expected_value:
+                return empty_cost(message="历史数据缺少模型信息")
+            missing[key] = expected_value - combined_value
+            has_missing = has_missing or missing[key] > 0
+        if has_missing:
+            if fallback_key is None:
+                return empty_cost(message="历史数据缺少模型信息")
+            missing_estimate = cost_for_usage(missing, fallback_key)
+            total += float(missing_estimate["cost_usd"] or 0)
+            models.append(fallback_key)
+            approximate = True
+
+    return {
+        "cost_usd": round(total, 8),
+        "cost_available": True,
+        "cost_approximate": approximate,
+        "cost_model": models[0] if len(models) == 1 else None,
+        "cost_models": sorted(set(models)),
+        "cost_message": "按当前模型估算历史数据" if approximate else "API 估算",
+    }
+
+
+def display_usage(raw: dict[str, int | None], cost: dict[str, Any] | None = None) -> dict[str, Any]:
     input_tokens = int(raw.get("input_tokens") or 0)
     cached_input = int(raw.get("cached_input_tokens") or 0)
     output_tokens = int(raw.get("output_tokens") or 0)
     cached_output = raw.get("cached_output_tokens")
     cached_output_value = int(cached_output) if cached_output is not None else None
-    return {
+    shown = {
         "input_tokens": input_tokens,
         "cached_input_tokens": cached_input,
         "uncached_input_tokens": max(input_tokens - cached_input, 0),
@@ -285,6 +449,8 @@ def display_usage(raw: dict[str, int | None]) -> dict[str, Any]:
         "output_cache_available": cached_output_value is not None,
         "reasoning_output_tokens": int(raw.get("reasoning_output_tokens") or 0),
     }
+    shown.update(cost if isinstance(cost, dict) else empty_cost())
+    return shown
 
 
 def empty_plan_usage(message: str = "等待 Codex 套餐数据") -> dict[str, Any]:
@@ -520,7 +686,7 @@ def base_state() -> dict[str, Any]:
         "today": display_usage(empty_usage()),
         "week": display_usage(empty_usage()),
         "plan_usage": empty_plan_usage(),
-        "tracked": {"today": {}, "week": {}},
+        "tracked": {"today": {}, "week": {}, "today_models": {}, "week_models": {}},
         "source": None,
         "message": "等待 Codex usage 数据",
         "seen": [],
@@ -549,11 +715,31 @@ def period_usage_views(
     tracked = state.get("tracked") if isinstance(state.get("tracked"), dict) else {}
     today_tracked = tracked.get("today") if isinstance(tracked.get("today"), dict) else {}
     week_tracked = tracked.get("week") if isinstance(tracked.get("week"), dict) else {}
+    today_models = tracked.get("today_models") if isinstance(tracked.get("today_models"), dict) else {}
+    week_models = tracked.get("week_models") if isinstance(tracked.get("week_models"), dict) else {}
     today_raw = today_tracked.get(day_key)
     week_raw = week_tracked.get(week_key)
+    today_model_usage = today_models.get(day_key)
+    week_model_usage = week_models.get(week_key)
+    current = state.get("current") if isinstance(state.get("current"), dict) else {}
+    fallback_model = current.get("model")
     return (
-        display_usage(today_raw if isinstance(today_raw, dict) else empty_usage()),
-        display_usage(week_raw if isinstance(week_raw, dict) else empty_usage()),
+        display_usage(
+            today_raw if isinstance(today_raw, dict) else empty_usage(),
+            cost_for_model_usage(
+                today_model_usage if isinstance(today_model_usage, dict) else {},
+                today_raw if isinstance(today_raw, dict) else None,
+                fallback_model,
+            ),
+        ),
+        display_usage(
+            week_raw if isinstance(week_raw, dict) else empty_usage(),
+            cost_for_model_usage(
+                week_model_usage if isinstance(week_model_usage, dict) else {},
+                week_raw if isinstance(week_raw, dict) else None,
+                fallback_model,
+            ),
+        ),
     )
 
 
@@ -608,15 +794,22 @@ def ingest_record(
             return
         seen.append(event_key)
         state["seen"] = seen[-500:]
-        tracked = state.setdefault("tracked", {"today": {}, "week": {}})
+        tracked = state.setdefault("tracked", {"today": {}, "week": {}, "today_models": {}, "week_models": {}})
         today_raw = tracked.setdefault("today", {}).setdefault(day_key, empty_usage())
         week_raw = tracked.setdefault("week", {}).setdefault(week_key, empty_usage())
+        today_models = tracked.setdefault("today_models", {}).setdefault(day_key, {})
+        week_models = tracked.setdefault("week_models", {}).setdefault(week_key, {})
+        model_key = record.get("model") if isinstance(record.get("model"), str) and record.get("model") else "__unknown__"
+        today_model_raw = today_models.setdefault(model_key, empty_usage())
+        week_model_raw = week_models.setdefault(model_key, empty_usage())
         merge_usage(today_raw, usage)
         merge_usage(week_raw, usage)
+        merge_usage(today_model_raw, usage)
+        merge_usage(week_model_raw, usage)
         state["today"], state["week"] = period_usage_views(state)
         if update_current:
             state["current"] = {
-                **display_usage(usage),
+                **display_usage(usage, cost_for_usage(usage, record.get("model"))),
                 "event_type": record.get("event_type"),
                 "thread_id": record.get("thread_id"),
                 "turn_id": record.get("turn_id"),
@@ -746,7 +939,7 @@ def update_current_snapshot(
         if previous_time and stamp < previous_time:
             return
         state["current"] = {
-            **display_usage(usage),
+            **display_usage(usage, cost_for_usage(usage, model)),
             "event_type": "token_count",
             "thread_id": thread_id,
             "turn_id": None,

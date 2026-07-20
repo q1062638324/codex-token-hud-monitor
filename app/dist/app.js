@@ -31,6 +31,12 @@ const formatTokens = (value) => {
   return number.toLocaleString("zh-CN");
 };
 const formatExactTokens = (value) => Number(value || 0).toLocaleString("zh-CN");
+const formatUsd = (usage) => {
+  if (!usage || usage.cost_available !== true || !Number.isFinite(Number(usage.cost_usd))) return "—";
+  const value = Number(usage.cost_usd);
+  return `$${value < 0.01 ? value.toFixed(4) : value.toFixed(2)}`;
+};
+const formatEstimatedCost = (usage) => `${usage?.cost_approximate ? "≈ API 估算" : "API 估算"} ${formatUsd(usage)}`;
 const planNames = {
   free: "免费",
   go: "Go",
@@ -116,6 +122,7 @@ function renderUsage(usage) {
   byId("output").textContent = formatTokens(current.output_tokens);
   byId("uncached-output").textContent = current.output_cache_available ? formatTokens(current.uncached_output_tokens) : "—";
   byId("reasoning").textContent = formatTokens(current.reasoning_output_tokens);
+  byId("current-cost").textContent = formatEstimatedCost(current);
 }
 
 function renderPeriod(usage) {
@@ -123,6 +130,7 @@ function renderPeriod(usage) {
   const total = Number(current.input_tokens || 0) + Number(current.output_tokens || 0);
   byId("period-total").textContent = formatTokens(total);
   byId("period-cache").textContent = `缓存命中 ${Math.round(Number(current.input_cache_hit_rate || 0) * 100)}%`;
+  byId("period-cost").textContent = formatEstimatedCost(current);
 }
 
 function render(state) {
