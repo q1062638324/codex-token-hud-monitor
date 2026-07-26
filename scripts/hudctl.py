@@ -685,8 +685,16 @@ def base_state() -> dict[str, Any]:
         "current": None,
         "today": display_usage(empty_usage()),
         "week": display_usage(empty_usage()),
+        "month": display_usage(empty_usage()),
         "plan_usage": empty_plan_usage(),
-        "tracked": {"today": {}, "week": {}, "today_models": {}, "week_models": {}},
+        "tracked": {
+            "today": {},
+            "week": {},
+            "month": {},
+            "today_models": {},
+            "week_models": {},
+            "month_models": {},
+        },
         "source": None,
         "message": "等待 Codex usage 数据",
         "seen": [],
@@ -704,23 +712,60 @@ def load_state() -> dict[str, Any]:
         return base_state()
 
 
+def aggregate_usage_buckets(
+    buckets: dict[str, Any], prefix: str
+) -> dict[str, int | None] | None:
+    """从旧版日累计桶中聚合指定月份，保证升级后本月数据不丢失。"""
+    result = empty_usage()
+    found = False
+    for key, raw in buckets.items():
+        if isinstance(key, str) and key.startswith(prefix) and isinstance(raw, dict):
+            merge_usage(result, raw)
+            found = True
+    return result if found else None
+
+
+def aggregate_model_buckets(
+    buckets: dict[str, Any], prefix: str
+) -> dict[str, dict[str, int | None]] | None:
+    """从旧版按日模型累计桶中聚合指定月份。"""
+    result: dict[str, dict[str, int | None]] = {}
+    for key, models in buckets.items():
+        if not isinstance(key, str) or not key.startswith(prefix) or not isinstance(models, dict):
+            continue
+        for model, raw in models.items():
+            if not isinstance(model, str) or not isinstance(raw, dict):
+                continue
+            merge_usage(result.setdefault(model, empty_usage()), raw)
+    return result or None
+
+
 def period_usage_views(
     state: dict[str, Any], stamp: dt.datetime | None = None
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """按当前本机日期和 ISO 周从原始累计数据重算 HUD 周期视图。"""
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """按本机日期、ISO 周和自然月重算 HUD 周期视图。"""
     local_stamp = stamp.astimezone() if stamp is not None else now_local()
     day_key = local_stamp.date().isoformat()
     iso = local_stamp.isocalendar()
     week_key = f"{iso.year}-W{iso.week:02d}"
+    month_key = f"{local_stamp.year}-{local_stamp.month:02d}"
     tracked = state.get("tracked") if isinstance(state.get("tracked"), dict) else {}
     today_tracked = tracked.get("today") if isinstance(tracked.get("today"), dict) else {}
     week_tracked = tracked.get("week") if isinstance(tracked.get("week"), dict) else {}
+    month_tracked = tracked.get("month") if isinstance(tracked.get("month"), dict) else {}
     today_models = tracked.get("today_models") if isinstance(tracked.get("today_models"), dict) else {}
     week_models = tracked.get("week_models") if isinstance(tracked.get("week_models"), dict) else {}
+    month_models = tracked.get("month_models") if isinstance(tracked.get("month_models"), dict) else {}
     today_raw = today_tracked.get(day_key)
     week_raw = week_tracked.get(week_key)
+    month_raw = aggregate_usage_buckets(today_tracked, month_key)
+    if month_raw is None:
+        month_raw = month_tracked.get(month_key)
     today_model_usage = today_models.get(day_key)
     week_model_usage = week_models.get(week_key)
+    month_model_usage = aggregate_model_buckets(today_models, month_key)
+    if month_model_usage is None:
+        month_model_usage = month_models.get(month_key)
     current = state.get("current") if isinstance(state.get("current"), dict) else {}
     fallback_model = current.get("model")
     return (
@@ -737,6 +782,14 @@ def period_usage_views(
             cost_for_model_usage(
                 week_model_usage if isinstance(week_model_usage, dict) else {},
                 week_raw if isinstance(week_raw, dict) else None,
+                fallback_model,
+            ),
+        ),
+        display_usage(
+            month_raw if isinstance(month_raw, dict) else empty_usage(),
+            cost_for_model_usage(
+                month_model_usage if isinstance(month_model_usage, dict) else {},
+                month_raw if isinstance(month_raw, dict) else None,
                 fallback_model,
             ),
         ),
@@ -762,14 +815,15 @@ def save_plugin_root_marker() -> None:
 
 
 def refresh_period_views() -> None:
-    """在跨日或跨周且没有新事件时，及时清理上一周期的显示值。"""
+    """在跨日、跨周或跨月且没有新事件时，及时刷新周期显示值。"""
     with STATE_LOCK:
         state = load_state()
-        today, week = period_usage_views(state)
-        if state.get("today") == today and state.get("week") == week:
+        today, week, month = period_usage_views(state)
+        if state.get("today") == today and state.get("week") == week and state.get("month") == month:
             return
         state["today"] = today
         state["week"] = week
+        state["month"] = month
         save_state(state)
 
 
@@ -786,6 +840,7 @@ def ingest_record(
     day_key = stamp.date().isoformat()
     iso = stamp.isocalendar()
     week_key = f"{iso.year}-W{iso.week:02d}"
+    month_key = f"{stamp.year}-{stamp.month:02d}"
     event_key = hashlib.sha256(json.dumps({"source": source, **record}, sort_keys=True).encode("utf-8")).hexdigest()
     with STATE_LOCK:
         state = load_state()
@@ -794,19 +849,34 @@ def ingest_record(
             return
         seen.append(event_key)
         state["seen"] = seen[-500:]
-        tracked = state.setdefault("tracked", {"today": {}, "week": {}, "today_models": {}, "week_models": {}})
+        tracked = state.setdefault(
+            "tracked",
+            {
+                "today": {},
+                "week": {},
+                "month": {},
+                "today_models": {},
+                "week_models": {},
+                "month_models": {},
+            },
+        )
         today_raw = tracked.setdefault("today", {}).setdefault(day_key, empty_usage())
         week_raw = tracked.setdefault("week", {}).setdefault(week_key, empty_usage())
+        month_raw = tracked.setdefault("month", {}).setdefault(month_key, empty_usage())
         today_models = tracked.setdefault("today_models", {}).setdefault(day_key, {})
         week_models = tracked.setdefault("week_models", {}).setdefault(week_key, {})
+        month_models = tracked.setdefault("month_models", {}).setdefault(month_key, {})
         model_key = record.get("model") if isinstance(record.get("model"), str) and record.get("model") else "__unknown__"
         today_model_raw = today_models.setdefault(model_key, empty_usage())
         week_model_raw = week_models.setdefault(model_key, empty_usage())
+        month_model_raw = month_models.setdefault(model_key, empty_usage())
         merge_usage(today_raw, usage)
         merge_usage(week_raw, usage)
+        merge_usage(month_raw, usage)
         merge_usage(today_model_raw, usage)
         merge_usage(week_model_raw, usage)
-        state["today"], state["week"] = period_usage_views(state)
+        merge_usage(month_model_raw, usage)
+        state["today"], state["week"], state["month"] = period_usage_views(state)
         if update_current:
             state["current"] = {
                 **display_usage(usage, cost_for_usage(usage, record.get("model"))),

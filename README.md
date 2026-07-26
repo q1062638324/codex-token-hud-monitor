@@ -10,7 +10,7 @@
 
 - **实时可见**：直接读取 Codex Desktop session 的 usage 事件，当前任务、输入、输出和 reasoning 一目了然。
 - **缓存透明**：拆分显示 cached input、uncached input 和 input cache hit rate，方便判断上下文复用效果。
-- **日周统计**：按本机时区累计今日与本周 token，支持跨任务查看本机使用趋势。
+- **日周月统计**：按本机时区累计今日、本周与本月 token，支持跨任务查看本机使用趋势。
 - **费用估算**：按当前模型的 OpenAI API input、cached input、output 单价估算美元费用，日周累计支持多模型分别计价。
 - **高对比撞色**：参考作品第 5 张配色，采用鲜艳粉红 `#FF449E` 与荧光青柠绿 `#ACFE6C`，让主数字、选中态和状态信息在透明桌面上更醒目。
 - **套餐余量**：通过 Codex 自带 app-server 读取当前套餐、剩余百分比和窗口重置时间；登录状态不可用时安全降级为未获取。

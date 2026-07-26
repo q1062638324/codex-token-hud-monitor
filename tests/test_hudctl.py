@@ -94,17 +94,20 @@ class HudCollectorTests(unittest.TestCase):
             "tracked": {
                 "today": {"2026-07-15": usage.copy()},
                 "week": {"2026-W29": usage.copy()},
+                "month": {"2026-07": usage.copy()},
                 "today_models": {"2026-07-15": {"gpt-5.6-sol": usage.copy()}},
                 "week_models": {"2026-W29": {"gpt-5.6-sol": usage.copy()}},
+                "month_models": {"2026-07": {"gpt-5.6-sol": usage.copy()}},
             }
         }
-        today, week = HUDCTL.period_usage_views(
+        today, week, month = HUDCTL.period_usage_views(
             state,
             HUDCTL.dt.datetime(2026, 7, 15, 8, 0, tzinfo=timezone),
         )
         self.assertTrue(today["cost_available"])
         self.assertAlmostEqual(today["cost_usd"], 0.00083, places=8)
         self.assertEqual(week["cost_models"], ["gpt-5.6-sol"])
+        self.assertAlmostEqual(month["cost_usd"], 0.00083, places=8)
 
     def test_period_views_estimate_legacy_data_with_current_model(self):
         timezone = HUDCTL.dt.timezone(HUDCTL.dt.timedelta(hours=8))
@@ -116,7 +119,7 @@ class HudCollectorTests(unittest.TestCase):
                 "week": {"2026-W29": usage.copy()},
             },
         }
-        today, week = HUDCTL.period_usage_views(
+        today, week, month = HUDCTL.period_usage_views(
             state,
             HUDCTL.dt.datetime(2026, 7, 15, 8, 0, tzinfo=timezone),
         )
@@ -125,6 +128,8 @@ class HudCollectorTests(unittest.TestCase):
         self.assertEqual(today["cost_message"], "按当前模型估算历史数据")
         self.assertAlmostEqual(today["cost_usd"], 0.000166, places=8)
         self.assertTrue(week["cost_approximate"])
+        self.assertTrue(month["cost_approximate"])
+        self.assertAlmostEqual(month["cost_usd"], 0.000166, places=8)
 
     def test_otlp_protobuf_log_attributes(self):
         log_record = (
@@ -215,12 +220,13 @@ class HudCollectorTests(unittest.TestCase):
                 "week": {"2026-W28": {"input_tokens": 456}},
             }
         }
-        today, week = HUDCTL.period_usage_views(
+        today, week, month = HUDCTL.period_usage_views(
             state,
             HUDCTL.dt.datetime(2026, 7, 15, 8, 0, tzinfo=timezone),
         )
         self.assertEqual(today["input_tokens"], 0)
         self.assertEqual(week["input_tokens"], 0)
+        self.assertEqual(month["input_tokens"], 123)
 
     def test_period_views_keep_current_day_and_week_data(self):
         timezone = HUDCTL.dt.timezone(HUDCTL.dt.timedelta(hours=8))
@@ -230,12 +236,32 @@ class HudCollectorTests(unittest.TestCase):
                 "week": {"2026-W29": {"input_tokens": 456}},
             }
         }
-        today, week = HUDCTL.period_usage_views(
+        today, week, month = HUDCTL.period_usage_views(
             state,
             HUDCTL.dt.datetime(2026, 7, 15, 8, 0, tzinfo=timezone),
         )
         self.assertEqual(today["input_tokens"], 123)
         self.assertEqual(week["input_tokens"], 456)
+        self.assertEqual(month["input_tokens"], 123)
+
+    def test_period_views_aggregate_legacy_daily_data_for_current_month(self):
+        timezone = HUDCTL.dt.timezone(HUDCTL.dt.timedelta(hours=8))
+        state = {
+            "tracked": {
+                "today": {
+                    "2026-06-30": {"input_tokens": 999},
+                    "2026-07-01": {"input_tokens": 200},
+                    "2026-07-15": {"input_tokens": 300},
+                },
+                "week": {},
+                "month": {"2026-07": {"input_tokens": 50}},
+            }
+        }
+        _, _, month = HUDCTL.period_usage_views(
+            state,
+            HUDCTL.dt.datetime(2026, 7, 20, 8, 0, tzinfo=timezone),
+        )
+        self.assertEqual(month["input_tokens"], 500)
 
 
 if __name__ == "__main__":
