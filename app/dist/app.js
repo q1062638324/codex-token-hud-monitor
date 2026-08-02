@@ -147,16 +147,18 @@ function render(state) {
 }
 
 let lastCollectorCheck = 0;
+let lastCollectorReady = false;
 async function ensureCollector(invoke) {
   const now = Date.now();
-  if (now - lastCollectorCheck < 5000) return true;
+  if (now - lastCollectorCheck < 5000) return lastCollectorReady;
   lastCollectorCheck = now;
   try {
     await invoke("ensure_collector");
-    return true;
+    lastCollectorReady = true;
   } catch {
-    return false;
+    lastCollectorReady = false;
   }
+  return lastCollectorReady;
 }
 
 async function refresh() {

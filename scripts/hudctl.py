@@ -19,6 +19,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlsplit
 
 
 HOST = "127.0.0.1"
@@ -827,6 +828,11 @@ def refresh_period_views() -> None:
         save_state(state)
 
 
+def request_path(value: str) -> str:
+    """提取 HTTP 请求路径，忽略前端用于禁用缓存的查询参数。"""
+    return urlsplit(value).path
+
+
 def ingest_record(
     record: dict[str, Any],
     source: str,
@@ -1126,10 +1132,11 @@ class HudHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
-        if self.path == "/health":
+        path = request_path(self.path)
+        if path == "/health":
             self.send_json(200, {"ok": True})
             return
-        if self.path in ("/", "/v1/state"):
+        if path in ("/", "/v1/state"):
             with STATE_LOCK:
                 self.send_json(200, load_state())
             return

@@ -35,6 +35,9 @@ def key_value(key, value):
 
 
 class HudCollectorTests(unittest.TestCase):
+    def test_request_path_ignores_cache_query(self):
+        self.assertEqual(HUDCTL.request_path("/v1/state?t=123"), "/v1/state")
+
     def test_json_usage_includes_cache_miss(self):
         records = HUDCTL.summaries_from_payload(
             {

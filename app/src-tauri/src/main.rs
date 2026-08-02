@@ -12,6 +12,102 @@ fn collector_is_ready() -> bool {
     .is_ok()
 }
 
+fn python_candidates() -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(value) = std::env::var_os("PYTHON") {
+        if !value.is_empty() {
+            candidates.push(std::path::PathBuf::from(value));
+        }
+    }
+
+    let mut roots = Vec::new();
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        roots.push(
+            std::path::PathBuf::from(local_app_data)
+                .join("Programs")
+                .join("Python"),
+        );
+    }
+    if let Some(program_files) = std::env::var_os("ProgramFiles") {
+        roots.push(std::path::PathBuf::from(program_files).join("Python"));
+    }
+    if let Some(program_files_x86) = std::env::var_os("ProgramFiles(x86)") {
+        roots.push(std::path::PathBuf::from(program_files_x86).join("Python"));
+    }
+    for root in roots {
+        let mut versions = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let is_python_directory = path.is_dir()
+                    && path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().starts_with("Python"))
+                        .unwrap_or(false);
+                if is_python_directory {
+                    versions.push(path);
+                }
+            }
+        }
+        versions.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+        candidates.extend(versions.into_iter().map(|path| path.join("python.exe")));
+    }
+
+    if let Some(user_profile) = std::env::var_os("USERPROFILE") {
+        candidates.push(
+            std::path::PathBuf::from(user_profile)
+                .join(".cache")
+                .join("codex-runtimes")
+                .join("codex-primary-runtime")
+                .join("dependencies")
+                .join("python")
+                .join("python.exe"),
+        );
+    }
+    candidates.push(std::path::PathBuf::from("python.exe"));
+    candidates.push(std::path::PathBuf::from("py.exe"));
+    candidates
+}
+
+fn resolve_python() -> Result<(std::path::PathBuf, Vec<String>), String> {
+    for candidate in python_candidates() {
+        let is_py_launcher = candidate
+            .file_name()
+            .map(|name| name.to_string_lossy().eq_ignore_ascii_case("py.exe"))
+            .unwrap_or(false);
+        let mut probe = std::process::Command::new(&candidate);
+        let mut probe_args = Vec::new();
+        if is_py_launcher {
+            probe_args.push("-3".to_string());
+        }
+        probe_args.push("-c".to_string());
+        probe_args.push("import sys".to_string());
+        probe
+            .args(&probe_args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            probe.creation_flags(0x08000000);
+        }
+        if probe
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+        {
+            let args = if is_py_launcher {
+                vec!["-3".to_string()]
+            } else {
+                Vec::new()
+            };
+            return Ok((candidate, args));
+        }
+    }
+    Err("找不到可用的 Python 解释器，请设置 PYTHON 环境变量".to_string())
+}
+
 fn find_plugin_root() -> Option<std::path::PathBuf> {
     let mut candidates = Vec::new();
     for key in ["CODEX_TOKEN_HUD_PLUGIN_ROOT", "PLUGIN_ROOT"] {
@@ -45,9 +141,10 @@ fn ensure_collector() -> Result<(), String> {
     let plugin_root = find_plugin_root()
         .ok_or_else(|| "找不到 Codex Token HUD 插件目录，无法启动 collector".to_string())?;
     let script = plugin_root.join("scripts").join("hudctl.py");
-    let python = std::env::var_os("PYTHON").unwrap_or_else(|| "python".into());
+    let (python, python_args) = resolve_python()?;
     let mut command = std::process::Command::new(python);
     command
+        .args(python_args)
         .arg(script)
         .arg("serve")
         .current_dir(&plugin_root)
