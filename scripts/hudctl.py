@@ -130,30 +130,69 @@ def find_first(value: Any, names: tuple[str, ...]) -> str | None:
     return None
 
 
+def _iter_scoped_json_objects(
+    value: Any,
+    inherited: dict[str, str] | None = None,
+) -> Iterable[tuple[dict[str, Any], dict[str, str]]]:
+    scope = dict(inherited or {})
+    metadata_fields = (
+        ("event_type", ("type", "event_type", "eventType", "name")),
+        ("thread_id", ("thread_id", "threadId", "conversation_id", "conversationId")),
+        ("turn_id", ("turn_id", "turnId")),
+        ("model", ("model", "model_slug", "modelSlug")),
+        ("timestamp", ("timestamp", "time_unix_nano", "timeUnixNano")),
+    )
+
+    if isinstance(value, dict):
+        metadata_sources: list[dict[str, Any]] = [value]
+        for key in ("metadata", "attributes"):
+            nested = value.get(key)
+            if isinstance(nested, dict):
+                metadata_sources.append(nested)
+        for field, names in metadata_fields:
+            for source in metadata_sources:
+                for name in names:
+                    item = source.get(name)
+                    if isinstance(item, (str, int, float)) and not isinstance(item, bool):
+                        scope[field] = str(item)
+                        break
+                else:
+                    continue
+                break
+        yield value, scope
+        for child in value.values():
+            yield from _iter_scoped_json_objects(child, scope)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _iter_scoped_json_objects(child, scope)
+    elif isinstance(value, str) and value.lstrip().startswith(("{", "[")):
+        try:
+            yield from _iter_scoped_json_objects(json.loads(value), scope)
+        except json.JSONDecodeError:
+            return
+
+
 def summaries_from_payload(payload: Any) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for obj in iter_json_objects(payload):
+    for obj, scope in _iter_scoped_json_objects(payload):
         usage = extract_usage(obj)
         if usage is None:
             continue
-        event_type = find_first(payload, ("type", "event_type", "eventType", "name")) or "usage"
-        thread_id = find_first(payload, ("thread_id", "threadId", "conversation_id", "conversationId"))
-        turn_id = find_first(payload, ("turn_id", "turnId"))
-        model = find_first(payload, ("model", "model_slug", "modelSlug"))
-        timestamp = find_first(payload, ("timestamp", "time_unix_nano", "timeUnixNano"))
         item = {
             "usage": usage,
-            "event_type": event_type,
-            "thread_id": thread_id,
-            "turn_id": turn_id,
-            "model": model,
-            "timestamp": timestamp,
+            "event_type": scope.get("event_type") or "usage",
+            "thread_id": scope.get("thread_id"),
+            "turn_id": scope.get("turn_id"),
+            "model": scope.get("model"),
+            "timestamp": scope.get("timestamp"),
         }
-        fingerprint = hashlib.sha256(json.dumps(item, sort_keys=True).encode("utf-8")).hexdigest()
-        if fingerprint not in seen:
-            seen.add(fingerprint)
-            results.append(item)
+        event_key = usage_event_key(item)
+        if event_key is not None:
+            if event_key in seen:
+                continue
+            seen.add(event_key)
+        results.append(item)
     return results
 
 
@@ -833,6 +872,39 @@ def request_path(value: str) -> str:
     return urlsplit(value).path
 
 
+def usage_event_key(record: dict[str, Any]) -> str | None:
+    """仅在能定位事件时跨来源去重；相同 token 数量本身不是事件标识。"""
+    thread_id = record.get("thread_id")
+    if not isinstance(thread_id, str) or not thread_id:
+        return None
+    timestamp = record.get("timestamp")
+    event_time = None
+    if isinstance(timestamp, str):
+        if timestamp.isdigit():
+            # OTLP 的 Unix 纳秒直接使用整数，避免浮点数损失精度。
+            event_time = int(timestamp)
+        else:
+            try:
+                parsed = dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    delta = parsed.astimezone(dt.timezone.utc) - dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+                    event_time = ((delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds) * 1000
+                    fraction = re.search(r"[.,](\d+)(?:Z|[+-]\d\d:\d\d)$", timestamp)
+                    if fraction:
+                        event_time += int((fraction.group(1) + "000000000")[6:9])
+            except ValueError:
+                pass
+    if event_time is not None:
+        identity = {"thread_id": thread_id, "timestamp_ns": event_time}
+    elif record.get("event_type") == "turn.completed" and record.get("turn_id"):
+        identity = {"thread_id": thread_id, "completed_turn": record["turn_id"]}
+    else:
+        return None
+    identity["usage"] = extract_usage(record.get("usage"))
+    identity["model"] = canonical_model(record.get("model")) or record.get("model")
+    return "v2:" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()
+
+
 def ingest_record(
     record: dict[str, Any],
     source: str,
@@ -847,14 +919,20 @@ def ingest_record(
     iso = stamp.isocalendar()
     week_key = f"{iso.year}-W{iso.week:02d}"
     month_key = f"{stamp.year}-{stamp.month:02d}"
-    event_key = hashlib.sha256(json.dumps({"source": source, **record}, sort_keys=True).encode("utf-8")).hexdigest()
+    event_key = usage_event_key(record)
+    legacy_key = hashlib.sha256(json.dumps({"source": source, **record}, sort_keys=True).encode("utf-8")).hexdigest()
     with STATE_LOCK:
         state = load_state()
         seen = state.setdefault("seen", [])
-        if event_key in seen:
-            return
-        seen.append(event_key)
-        state["seen"] = seen[-500:]
+        if event_key is not None:
+            if event_key in seen:
+                return
+            seen.append(event_key)
+            state["seen"] = seen[-500:]
+            if legacy_key in seen:
+                # 旧指纹只保存了哈希，重遇原来源时补充新键，不重算历史累计。
+                save_state(state)
+                return
         tracked = state.setdefault(
             "tracked",
             {
@@ -1049,10 +1127,18 @@ def scan_rollouts_once() -> None:
         last_usage = snapshot_usage(entry.get("last_usage"))
         last_timestamp = parse_event_time(entry.get("last_timestamp"))
         try:
-            with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            with path.open("rb") as handle:
                 handle.seek(offset)
-                for line in handle:
-                    parsed = parse_rollout_token_count(line)
+                while True:
+                    line = handle.readline()
+                    if not line or not line.endswith(b"\n"):
+                        # 未完成的行保留起始字节偏移，含 UTF-8 半个字符也能在下次重读。
+                        break
+                    offset = handle.tell()
+                    try:
+                        parsed = parse_rollout_token_count(line.decode("utf-8"))
+                    except UnicodeDecodeError:
+                        continue
                     if parsed is None:
                         continue
                     info, event_time = parsed
@@ -1083,7 +1169,6 @@ def scan_rollouts_once() -> None:
                             last_timestamp = event_time
                         if event_time and (latest is None or event_time >= latest[0]):
                             latest = (event_time, current_usage, thread_id, model)
-                offset = handle.tell()
         except OSError:
             continue
         entry["offset"] = offset

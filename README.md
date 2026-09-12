@@ -81,6 +81,18 @@ Get-Content .\tests\sample-turn.jsonl | python .\scripts\hudctl.py ingest
 
 该脚本会把 Codex 输出原样写到 stdout，并把 `turn.completed` 事件发送到本地 HUD。
 
+## 采集一致性与回归检查
+
+批量 JSON 中的 usage 只继承所属事件的元数据，不借用其他事件的任务或模型信息。rollout 按完整换行推进字节游标，尚未写完的 JSON 或 UTF-8 字符会留到下次扫描。
+
+跨来源去重使用任务 ID、事件时间、模型和 usage；没有时间时，只对同时具备任务 ID 与 turn ID 的 `turn.completed` 事件去重。ISO 时间和 OTLP Unix 纳秒会归一化，来源标签不参与新指纹。缺少可靠标识、不同来源的时间或统计粒度不一致时，无法安全认定为同一事件，仍分别保留；因此不要把无标识的同一用量同时从多个入口上报。去重保留最近 500 个事件指纹，旧版本累计不会自动回溯修正。
+
+在仓库根目录运行隔离测试（不访问真实会话或账户服务）：
+
+```powershell
+python -B -m unittest discover -s tests -v
+```
+
 ## OTel 接入
 
 Codex 当前版本的 OTel 配置字段和传输格式可能随版本变化，建议先按当前版本的官方配置启用本地 OTLP exporter，再将 endpoint 指向：
