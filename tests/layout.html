@@ -24,6 +24,7 @@
     const root = doc.querySelector('.hud').getBoundingClientRect();
     const body = doc.querySelector('.hud-body').getBoundingClientRect();
     check(body.right <= root.right + 1 && body.bottom <= root.bottom + 1, label);
+    check(Math.abs((body.left - root.left) - (root.right - body.right)) <= 1, `${label}: 左右留白一致`);
     for (const selector of ['.top-actions', '.period-tabs', '.period-foot', '.footer']) {
       const element = doc.querySelector(selector);
       check(element.scrollWidth <= element.clientWidth + 1, `${label}: ${selector}`);

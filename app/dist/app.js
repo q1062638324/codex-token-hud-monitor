@@ -21,7 +21,9 @@ function updateUiScale() {
   const heightScale = contentHeight / baseLayoutHeight;
   // 窗口有最小尺寸，但内容必须始终以实际可用空间为准，不能强制放大。
   const scale = Math.max(0, Math.min(maxWindowScale, widthScale, heightScale));
-  hudBody.style.transform = `scale(${scale})`;
+  // 按高度缩放时，把多出的水平空间平均分到两侧。
+  const offsetX = Math.max(0, (contentWidth - baseLayoutWidth * scale) / 2);
+  hudBody.style.transform = `translateX(${offsetX}px) scale(${scale})`;
 }
 
 const formatTokens = (value) => {
