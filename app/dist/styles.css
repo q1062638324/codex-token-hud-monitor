@@ -56,7 +56,7 @@ button { font: inherit; }
 .topbar, .brand, .top-actions, .metric-row, .period-foot, .footer { display: flex; align-items: center; min-width: 0; }
 .topbar, .metric-row, .period-foot, .footer { justify-content: space-between; }
 .topbar { cursor: move; }
-.hud-body { width: 100%; min-width: 0; transform-origin: top left; }
+.hud-body { width: 338px; min-width: 0; transform-origin: top left; }
 
 .brand { gap: 10px; }
 .brand-mark { color: var(--signal-lime); font-size: 24px; text-shadow: 0 0 16px rgba(172, 254, 108, 0.75); }
@@ -88,12 +88,12 @@ h1 { margin: 1px 0 0; font-size: 17px; letter-spacing: 0.02em; }
 
 .summary-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; min-width: 0; margin-top: 13px; }
 .period-card, .quota-card { min-width: 0; padding: 11px 12px 10px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255, 68, 158, 0.12); box-shadow: inset 0 1px 0 rgba(172, 254, 108, 0.08); }
-.period-tabs { display: flex; gap: 5px; }
-.period-tab { padding: 3px 8px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; }
+.period-tabs { display: flex; gap: 2px; }
+.period-tab { padding: 3px 5px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; white-space: nowrap; }
 .period-tab.active { color: #3a0a2e; background: var(--signal-lime); font-weight: 750; }
 .period-value { margin: 5px 0 2px; color: var(--signal-lime); text-shadow: 0 0 14px rgba(172, 254, 108, 0.28); font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 700; }
 .period-cost { color: var(--signal-lime); font-variant-numeric: tabular-nums; font-size: 11px; }
-.period-foot { color: var(--muted); font-size: 10px; }
+.period-foot { flex-wrap: wrap; gap: 4px; color: var(--muted); font-size: 10px; }
 .tracked { padding: 3px 6px; border: 1px solid rgba(172, 254, 108, 0.42); border-radius: 5px; color: var(--signal-lime); background: rgba(172, 254, 108, 0.06); }
 .quota-head, .quota-primary-row, .quota-secondary { display: flex; align-items: center; justify-content: space-between; min-width: 0; gap: 6px; }
 .quota-plan, .quota-primary-row span, .quota-secondary span, .quota-reset, .quota-status, .quota-credits { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

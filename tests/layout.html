@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>HUD 布局回归检查</title>
+<style>
+  body { margin: 16px; background: #242424; color: white; font: 14px sans-serif; }
+  #previews { display: flex; align-items: start; gap: 16px; }
+  iframe { border: 0; display: block; flex: none; }
+  pre { white-space: pre-wrap; max-height: 80px; overflow: auto; }
+</style>
+<h1>HUD 布局回归检查（仅模拟数据）</h1>
+<pre id="result">RUNNING</pre>
+<div id="previews"></div>
+<script>
+  // 从仓库根目录运行 python -m http.server，再打开 /tests/layout.html。
+  const results = [];
+  const settle = () => new Promise(resolve => setTimeout(resolve, 80));
+  function check(condition, label) {
+    results.push({ label, passed: Boolean(condition) });
+    if (!condition) throw new Error(label);
+  }
+  function contained(frame, label) {
+    const doc = frame.contentDocument;
+    const root = doc.querySelector('.hud').getBoundingClientRect();
+    const body = doc.querySelector('.hud-body').getBoundingClientRect();
+    check(body.right <= root.right + 1 && body.bottom <= root.bottom + 1, label);
+    for (const selector of ['.top-actions', '.period-tabs', '.period-foot', '.footer']) {
+      const element = doc.querySelector(selector);
+      check(element.scrollWidth <= element.clientWidth + 1, `${label}: ${selector}`);
+    }
+  }
+  async function run() {
+    const html = await (await fetch('../app/dist/index.html')).text();
+    const mock = `
+      window.fixture = { current: {input_tokens: 12345678, output_tokens: 12345, model: 'gpt-5.6-luna', turn_id: 'fixture-turn'}, message: '模拟数据', updated_at: '2026-09-13T12:34:56' };
+      window.commands = [];
+      window.__TAURI__ = {core: {invoke: async (command, args) => {
+        commands.push({command, args});
+        if (command === 'read_state') return JSON.stringify(fixture);
+        if (command === window.failCommand) throw new Error('模拟原生调用失败');
+        if (command === 'minimize_to_icon') { frameElement.width = 48; frameElement.height = 48; }
+        if (command === 'restore_window' || command === 'resize_window') { frameElement.width = args.width; frameElement.height = args.height; }
+      }}};
+    `;
+    for (const [width, height] of [[281, 360], [390, 500], [585, 750]]) {
+      const frame = document.createElement('iframe');
+      frame.width = width;
+      frame.height = height;
+      const loaded = new Promise(resolve => frame.onload = resolve);
+      frame.srcdoc = html.replace('<head>', `<head><base href="${new URL('../app/dist/', location.href)}"><script>${mock}<\/script>`);
+      document.querySelector('#previews').append(frame);
+      await loaded;
+      await settle();
+      contained(frame, `${width}×${height} 等待套餐`);
+      const win = frame.contentWindow;
+      win.fixture.plan_usage = {available: true, plan_type: 'pro', primary: {remaining_percent: 72, window_minutes: 300, resets_at: 1800000000}, secondary: {remaining_percent: 38, window_minutes: 10080, resets_at: 1800500000}, credits: {has_credits: true, balance: '25'}};
+      await win.refresh();
+      contained(frame, `${width}×${height} 完整套餐`);
+      const doc = frame.contentDocument;
+      doc.querySelector('#minimize').click();
+      await settle();
+      check(doc.querySelector('.hud').classList.contains('icon-mode') && win.innerWidth === 48, '缩小到图标');
+      await win.restoreFromIcon({stopPropagation() {}});
+      await settle();
+      check(win.innerWidth === width && win.innerHeight === height, '恢复原窗口尺寸');
+      contained(frame, `${width}×${height} 图标恢复`);
+      win.failCommand = 'minimize_to_icon';
+      doc.querySelector('#minimize').click();
+      await settle();
+      check(!doc.querySelector('.hud').classList.contains('icon-mode'), '缩小失败恢复面板');
+      win.failCommand = null;
+      const handle = doc.querySelector('#resize-handle');
+      // 合成事件不持有系统指针，只替换 capture；尺寸计算和 IPC 参数走真实处理器。
+      handle.setPointerCapture = () => {};
+      handle.releasePointerCapture = () => {};
+      async function drag(delta, ending = 'pointerup') {
+        handle.dispatchEvent(new win.PointerEvent('pointerdown', {pointerId: 1, button: 0, clientX: 10, clientY: 10}));
+        handle.dispatchEvent(new win.PointerEvent('pointermove', {pointerId: 1, clientX: delta + 10, clientY: delta + 10}));
+        await settle();
+        handle.dispatchEvent(new win.PointerEvent(ending, {pointerId: 1}));
+      }
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await drag(-1000);
+        check(win.innerWidth === 281 && win.innerHeight === 360, '重复缩小不突破下限');
+        contained(frame, '拖动到最小尺寸');
+      }
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await drag(1000, 'pointercancel');
+        check(win.innerWidth === 585 && win.innerHeight === 750, '重复放大不突破上限');
+      }
+      const commandCount = win.commands.length;
+      handle.dispatchEvent(new win.PointerEvent('pointermove', {pointerId: 1, clientX: 0, clientY: 0}));
+      check(win.commands.length === commandCount, '取消拖动后不再缩放');
+      // 模拟历史过小窗口，验证内容仍不会受固定 scale 下限裁切。
+      frame.width = 195;
+      frame.height = 250;
+      await settle();
+      contained(frame, '历史过小窗口');
+      frame.width = width;
+      frame.height = height;
+      await settle();
+    }
+    document.querySelector('#result').textContent = JSON.stringify({passed: true, checks: results.length, results}, null, 2);
+    document.querySelector('#result').style.maxHeight = '80px';
+    document.querySelector('#result').style.overflow = 'auto';
+  }
+  run().catch(error => { document.querySelector('#result').textContent = JSON.stringify({passed: false, error: error.message, results}, null, 2); });
+</script>
+</html>

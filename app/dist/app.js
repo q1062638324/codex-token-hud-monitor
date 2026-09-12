@@ -4,23 +4,23 @@ const byId = (id) => document.getElementById(id);
 const hudRoot = document.querySelector(".hud");
 const hudBody = document.querySelector(".hud-body");
 const iconFace = byId("icon-face");
-let baseLayoutWidth = 0;
-let baseLayoutHeight = 0;
+const normalLayoutSize = { width: 390, height: 500 };
+const minWindowScale = 0.72;
+const maxWindowScale = 1.5;
 
 function updateUiScale() {
   if (hudRoot.classList.contains("icon-mode")) return;
-  if (!baseLayoutWidth || !baseLayoutHeight) {
-    baseLayoutWidth = hudBody.getBoundingClientRect().width;
-    baseLayoutHeight = hudBody.getBoundingClientRect().height;
-  }
+  // 使用未变换的自然尺寸，套餐附加行出现后也要重新计算高度。
+  const baseLayoutWidth = hudBody.offsetWidth;
+  const baseLayoutHeight = hudBody.offsetHeight;
+  if (!baseLayoutWidth || !baseLayoutHeight) return;
   const rootStyle = getComputedStyle(hudRoot);
   const contentWidth = hudRoot.clientWidth - parseFloat(rootStyle.paddingLeft) - parseFloat(rootStyle.paddingRight);
   const contentHeight = hudRoot.clientHeight - parseFloat(rootStyle.paddingTop) - parseFloat(rootStyle.paddingBottom);
   const widthScale = contentWidth / baseLayoutWidth;
   const heightScale = contentHeight / baseLayoutHeight;
-  const scale = Math.max(0.72, Math.min(1.5, Math.min(widthScale, heightScale)));
-  hudBody.style.width = `${baseLayoutWidth}px`;
-  hudBody.style.height = `${baseLayoutHeight}px`;
+  // 窗口有最小尺寸，但内容必须始终以实际可用空间为准，不能强制放大。
+  const scale = Math.max(0, Math.min(maxWindowScale, widthScale, heightScale));
   hudBody.style.transform = `scale(${scale})`;
 }
 
@@ -144,6 +144,7 @@ function render(state) {
   byId("updated").textContent = state.updated_at ? state.updated_at.slice(11, 19) : "—";
   byId("connection").classList.add("ready");
   byId("connection").lastChild.textContent = " 已连接";
+  updateUiScale();
 }
 
 let lastCollectorCheck = 0;
@@ -189,16 +190,25 @@ document.querySelectorAll(".period-tab").forEach((button) => {
   });
 });
 
-let normalWindowSize = { width: window.outerWidth, height: window.outerHeight };
+let normalWindowSize = { width: window.innerWidth, height: window.innerHeight };
+let windowTransitionBusy = false;
 const invokeNative = () => window.__TAURI__?.core?.invoke;
 
 async function minimizeToIcon(event) {
   event.stopPropagation();
   const invoke = invokeNative();
-  if (!invoke) return;
-  normalWindowSize = { width: window.outerWidth, height: window.outerHeight };
+  if (!invoke || windowTransitionBusy) return;
+  windowTransitionBusy = true;
+  normalWindowSize = { width: window.innerWidth, height: window.innerHeight };
   hudRoot.classList.add("icon-mode");
-  await invoke("minimize_to_icon");
+  try {
+    await invoke("minimize_to_icon");
+  } catch {
+    hudRoot.classList.remove("icon-mode");
+    updateUiScale();
+  } finally {
+    windowTransitionBusy = false;
+  }
 }
 
 async function minimizeToTray(event) {
@@ -211,10 +221,17 @@ async function minimizeToTray(event) {
 async function restoreFromIcon(event) {
   event.stopPropagation();
   const invoke = invokeNative();
-  if (!invoke) return;
-  await invoke("restore_window", normalWindowSize);
-  hudRoot.classList.remove("icon-mode");
-  updateUiScale();
+  if (!invoke || windowTransitionBusy) return;
+  windowTransitionBusy = true;
+  try {
+    await invoke("restore_window", normalWindowSize);
+    hudRoot.classList.remove("icon-mode");
+    updateUiScale();
+  } catch {
+    // 原生窗口恢复失败时保留图标，允许再次点击重试。
+  } finally {
+    windowTransitionBusy = false;
+  }
 }
 
 byId("minimize").addEventListener("click", minimizeToIcon);
@@ -288,6 +305,7 @@ let resizeState = null;
 let resizeBusy = false;
 
 resizeHandle.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || windowTransitionBusy) return;
   event.preventDefault();
   event.stopPropagation();
   resizeHandle.setPointerCapture(event.pointerId);
@@ -295,23 +313,26 @@ resizeHandle.addEventListener("pointerdown", (event) => {
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
-    width: window.outerWidth,
-    height: window.outerHeight,
+    width: window.innerWidth,
+    height: window.innerHeight,
   };
 });
 
 resizeHandle.addEventListener("pointermove", async (event) => {
   if (!resizeState || resizeBusy || event.pointerId !== resizeState.pointerId) return;
-  const scaleX = (resizeState.width + event.clientX - resizeState.startX) / resizeState.width;
-  const scaleY = (resizeState.height + event.clientY - resizeState.startY) / resizeState.height;
-  const scale = Math.max(0.72, Math.min(1.5, Math.min(scaleX, scaleY)));
-  const width = Math.round(resizeState.width * scale);
-  const height = Math.round(resizeState.height * scale);
+  const scaleX = (resizeState.width + event.clientX - resizeState.startX) / normalLayoutSize.width;
+  const scaleY = (resizeState.height + event.clientY - resizeState.startY) / normalLayoutSize.height;
+  // 相对固定基准限制尺寸，避免多次拖动突破上下限。
+  const scale = Math.max(minWindowScale, Math.min(maxWindowScale, scaleX, scaleY));
+  const width = Math.round(normalLayoutSize.width * scale);
+  const height = Math.round(normalLayoutSize.height * scale);
   const invoke = invokeNative();
   if (!invoke) return;
   resizeBusy = true;
   try {
     await invoke("resize_window", { width, height });
+  } catch {
+    resizeState = null;
   } finally {
     resizeBusy = false;
   }
@@ -323,6 +344,8 @@ resizeHandle.addEventListener("pointerup", (event) => {
     resizeState = null;
   }
 });
+resizeHandle.addEventListener("pointercancel", () => { resizeState = null; });
+resizeHandle.addEventListener("lostpointercapture", () => { resizeState = null; });
 
 refresh();
 setInterval(refresh, 1000);
