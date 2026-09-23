@@ -39,8 +39,8 @@
         commands.push({command, args});
         if (command === 'read_state') return JSON.stringify(fixture);
         if (command === window.failCommand) throw new Error('模拟原生调用失败');
-        if (command === 'minimize_to_icon') { frameElement.width = 48; frameElement.height = 48; }
-        if (command === 'restore_window' || command === 'resize_window') { frameElement.width = args.width; frameElement.height = args.height; }
+        if (command === 'minimize_to_icon') { frameElement.width = 48; frameElement.height = 48; window.dispatchEvent(new Event('resize')); }
+        if (command === 'restore_window' || command === 'resize_window') { frameElement.width = args.width; frameElement.height = args.height; window.dispatchEvent(new Event('resize')); }
       }}};
     `;
     for (const [width, height] of [[281, 360], [390, 500], [585, 750]]) {
@@ -95,10 +95,12 @@
       // 模拟历史过小窗口，验证内容仍不会受固定 scale 下限裁切。
       frame.width = 195;
       frame.height = 250;
+      win.dispatchEvent(new win.Event('resize'));
       await settle();
       contained(frame, '历史过小窗口');
       frame.width = width;
       frame.height = height;
+      win.dispatchEvent(new win.Event('resize'));
       await settle();
     }
     document.querySelector('#result').textContent = JSON.stringify({passed: true, checks: results.length, results}, null, 2);
